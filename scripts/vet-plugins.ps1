@@ -60,6 +60,9 @@ function ConvertTo-JsonText($Value) {
     if ($Value -is [Management.Automation.PSCustomObject]) {
         return '{ ' + (@(foreach ($p in $Value.PSObject.Properties) { "$(ConvertTo-JsonText $p.Name): $(ConvertTo-JsonText $p.Value)" }) -join ', ') + ' }'
     }
+    if ($Value -is [Collections.IDictionary]) {
+        return '{ ' + (@(foreach ($key in $Value.Keys) { "$(ConvertTo-JsonText ([string]$key)): $(ConvertTo-JsonText $Value[$key])" }) -join ', ') + ' }'
+    }
     if ($Value -isnot [string] -and $Value -is [Collections.IEnumerable]) {
         return '[' + (@(foreach ($item in $Value) { ConvertTo-JsonText $item }) -join ', ') + ']'
     }

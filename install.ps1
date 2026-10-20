@@ -581,7 +581,7 @@ foreach ($plugin in $installable) {
 }
 # Installed plugins, the ones just installed included: the marketplace may have moved on
 # between the scan and the install
-if ($installable.Count -and -not $DryRun) { $userPlugins = Get-UserPlugins }
+if ($installable.Count -and -not $DryRun) { $userPlugins = Get-UserPlugins; $MarketplaceCache.Clear() }
 $open = [ordered]@{ unvetted = @(); changed = @(); unapproved = @(); incomplete = @(); unreadable = @() }
 foreach ($plugin in @($enabled | Where-Object { $userPlugins.Contains($_) })) {
     $folder = $userPlugins[$plugin].Folder
