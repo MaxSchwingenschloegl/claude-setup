@@ -107,10 +107,13 @@ function Read-PluginVetting {
 #   unvetted    no scan recorded
 #   changed     the content differs from what was scanned
 #   unapproved  score above the limit and no approval recorded
+#   incomplete  the scan did not cover every file and no approval recorded
 function Get-PluginVerdict($Entry, [string]$Hash, [string]$Commit) {
     if (-not $Entry) { return 'unvetted' }
     if ($Hash) { if ($Entry.hash -ne $Hash) { return 'changed' } }
     elseif (-not $Commit -or $Entry.commit -ne $Commit) { return 'changed' }
-    if ([int]$Entry.score -gt $PluginScoreLimit -and -not $Entry.approved) { return 'unapproved' }
+    if ($Entry.approved) { return 'ok' }
+    if ([int]$Entry.score -gt $PluginScoreLimit) { return 'unapproved' }
+    if ($Entry.analysis -and $Entry.analysis -ne 'complete') { return 'incomplete' }
     return 'ok'
 }

@@ -81,14 +81,17 @@ function Read-Report([string]$Path) {
     $semanticText = if (-not $applicable) { 'not applicable' }
                     elseif ($done -eq $applicable) { 'completed' }
                     else { "$done of $applicable completed" }
+    $completeness = $report.analysis_completeness
     [pscustomobject]@{
         skillspector   = $report.metadata.skillspector_version
         score          = [int]$report.risk_assessment.score
         recommendation = $report.risk_assessment.recommendation
         issues         = if ($counts) { $counts -join ', ' } else { 'none' }
-        analysis       = $report.analysis_completeness.status
+        analysis       = if ($completeness.status -eq 'complete') { 'complete' }
+                         else { [string]::Format([Globalization.CultureInfo]::InvariantCulture, '{0}, {1:0.#} % covered',
+                                                 $completeness.status, [double]$completeness.coverage_percent) }
         semantic       = $semanticText
-        complete       = [bool]$report.execution_successful
+        complete       = $completeness.status -eq 'complete'
     }
 }
 
@@ -142,12 +145,16 @@ foreach ($name in $names) {
     $output = skillspector scan $folder --format json --output $file 2>&1
     $exitCode = $LASTEXITCODE
     $ErrorActionPreference = 'Stop'
-    if ($exitCode -or -not (Test-Path -LiteralPath $file)) {
+    # Exit code 2 with a report means an incomplete run, which is recorded as such
+    if (-not (Test-Path -LiteralPath $file)) {
         Write-Warning "skillspector could not scan ${name} (exit code $exitCode): $(@($output | Where-Object { $_ -notmatch 'WARNING \[skillspector' }) -join ' ')"
         continue
     }
     $result = Read-Report $file
-    if (-not $result.complete) { Write-Warning "${name}: skillspector reports an unsuccessful run; see $file" }
+    if (-not $result.complete) {
+        Write-Warning ("${name}: the scan is incomplete ($($result.analysis)). A large plugin can run out of skillspector's " +
+                       'time limit, SKILLSPECTOR_MAX_WORKFLOW_SECONDS (600 by default); raise it and scan again with -Force.')
+    }
 
     $entry = [pscustomobject]@{
         version = $version; commit = $commit; hash = $hash; scanned = $today
@@ -177,9 +184,9 @@ if ($changed) {
     Write-Host "Updated $($L.Config)\vetting.json; review it with git diff and commit it." -ForegroundColor Green
 }
 $rows | Format-Table -AutoSize -Wrap | Out-String -Width 200 | Write-Host
-$open = @($rows | Where-Object Verdict -eq 'unapproved')
+$open = @($rows | Where-Object { $_.Verdict -in 'unapproved', 'incomplete' })
 if ($open.Count) {
-    Write-Host "Score above $PluginScoreLimit without an approval: $($open.Plugin -join ', ')." -ForegroundColor Yellow
+    Write-Host "Score above $PluginScoreLimit or scan incomplete, without an approval: $($open.Plugin -join ', ')." -ForegroundColor Yellow
     Write-Host '  Read every finding in the report. If each is harmless, add "approved" (the date) and "reasons" to the' -ForegroundColor Yellow
     Write-Host '  entry in vetting.json; otherwise disable the plugin in settings.json and uninstall it.' -ForegroundColor Yellow
 }

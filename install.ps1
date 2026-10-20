@@ -537,7 +537,8 @@ foreach ($account in $L.Accounts) {
 #    Not by default: a plugin runs code, and what gets installed is your decision, after a look.
 $verdictText = @{
     ok = 'scanned'; unvetted = 'not scanned'; changed = 'changed since the scan'
-    unapproved = "score above $PluginScoreLimit, not approved"; unknown = 'marketplace not on this machine'
+    unapproved = "score above $PluginScoreLimit, not approved"; incomplete = 'scan incomplete, not approved'
+    unknown = 'marketplace not on this machine'
 }
 $enabled = Get-EnabledPlugins
 $vetting = Read-PluginVetting
@@ -574,7 +575,7 @@ foreach ($plugin in $installable) {
 # Installed plugins, the ones just installed included: the marketplace may have moved on
 # between the scan and the install
 if ($installable.Count -and -not $DryRun) { $userPlugins = Get-UserPlugins }
-$open = [ordered]@{ unvetted = @(); changed = @(); unapproved = @() }
+$open = [ordered]@{ unvetted = @(); changed = @(); unapproved = @(); incomplete = @() }
 foreach ($plugin in @($enabled | Where-Object { $userPlugins.Contains($_) })) {
     $folder = $userPlugins[$plugin].Folder
     if (-not (Test-Path -LiteralPath $folder)) { Write-Warning "The files of $plugin are missing ($folder); reinstall it."; continue }

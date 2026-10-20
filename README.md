@@ -195,12 +195,16 @@ records the results in your configuration's `vetting.json`. Commit that file wit
 - Each entry holds the version, a fingerprint of the plugin's files, the date, the score, the
   recommendation and the findings by severity. A plugin that is not installed yet is scanned in
   the local copy of its marketplace, before it ever runs.
-- A score above 50 needs an exception: read every finding in the report the script names, and if
-  each one is harmless, add `"approved"` (the date) and `"reasons"` to the plugin's entry. An
-  approval holds only for the files it was given for; when they change, the next scan drops it.
+- A score above 50, or a scan that did not cover every file, needs an exception: read every
+  finding in the report the script names, and if each one is harmless, add `"approved"` (the
+  date) and `"reasons"` to the plugin's entry. An approval holds only for the files it was given
+  for; when they change, the next scan drops it.
+- skillspector stops after 600 seconds. A large plugin (superpowers has over 200 files) needs
+  more: set `$env:SKILLSPECTOR_MAX_WORKFLOW_SECONDS = 3600` before the scan. Every extra minute
+  is more LLM calls against your plan.
 - `install.ps1` warns about every enabled plugin without a scan, changed since its scan, or above
-  50 without an approval. `-InstallPlugins` installs only plugins whose scan matches what the
-  marketplace would install.
+  50 or incomplete without an approval. `-InstallPlugins` installs only plugins whose scan
+  matches what the marketplace would install.
 - Most official plugins have no version of their own and take the marketplace's commit as one,
   which changes with every marketplace update. The fingerprint does not, so an update that left a
   plugin alone needs no new scan.
