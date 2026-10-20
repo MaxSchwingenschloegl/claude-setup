@@ -119,7 +119,10 @@ Run the dry run first and read it. The installer takes over what you had:
 - your login in `~/.claude` moves to the default account, so you stay signed in there;
 - `~/.claude.json` (MCP servers, trusted projects) is copied to the default account;
 - your skills in `~/.claude/skills`, and the contents of `commands`, `rules`, `agents` and
-  `output-styles`, move into your configuration; review them there with `git status`;
+  `output-styles`, move into your configuration; review them there with `git status`. When
+  `~/.claude/skills` is a link (`npx skills` makes one to `~/.agents/skills`), its skills stay
+  where they are and the installer names them: copy the ones you want into your configuration's
+  `skills` folder after scanning them;
 - transcripts, memory and input history stay in `~/.claude` and are shared from then on;
 - a plain `settings.json` or `CLAUDE.md` is taken into your configuration only when it is a newer,
   changed copy of it. Your own old one is kept as `settings.json.backup-<time>` in `~/.claude`;

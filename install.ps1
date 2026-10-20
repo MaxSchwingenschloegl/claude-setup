@@ -343,12 +343,20 @@ if ((Test-Path $homeState) -and -not (Test-Path "$defaultDir\.claude.json")) {
     Write-Step "copy $homeState (MCP servers, trusted projects) to the default account $($L.Default)"
     if (-not $DryRun) { Copy-Item -LiteralPath $homeState "$defaultDir\.claude.json" }
 }
-#    Personal skills in ~/.claude/skills move into the configuration's skills folder
+#    Personal skills in ~/.claude/skills move into the configuration's skills folder. A linked
+#    skills folder belongs to another tool (npx skills links ~/.agents/skills there): its skills
+#    stay where they are and are only named, as taking them over unasked would skip the scan.
 $hubSkills = Join-Path $L.Hub 'skills'
 $hubSkillsItem = Get-Item -LiteralPath $hubSkills -Force -ErrorAction SilentlyContinue
-if ($hubSkillsItem -and -not $hubSkillsItem.LinkType) {
-    foreach ($skill in @(Get-ChildItem -LiteralPath $hubSkills -Directory -Force | Where-Object { Test-Path "$($_.FullName)\SKILL.md" })) {
-        if (Test-Path "$($L.Config)\skills\$($skill.Name)") { continue }
+$hubOnly = @(if ($hubSkillsItem) {
+    Get-ChildItem -LiteralPath $hubSkills -Directory -Force -ErrorAction SilentlyContinue |
+        Where-Object { (Test-Path "$($_.FullName)\SKILL.md") -and -not (Test-Path "$($L.Config)\skills\$($_.Name)") }
+})
+if ($hubSkillsItem.LinkType -and $hubOnly.Count) {
+    Write-Warning ("$hubSkills links to $(@($hubSkillsItem.Target)[0]), so its skills are not taken over and no account sees them: " +
+                   "$($hubOnly.Name -join ', '). Copy the ones you want into $($L.Config)\skills after scanning them with skillspector.")
+} elseif (-not $hubSkillsItem.LinkType) {
+    foreach ($skill in $hubOnly) {
         Write-Step "move your skill $($skill.Name) from $hubSkills into $($L.Config)\skills"
         if (-not $DryRun) {
             New-Item -ItemType Directory -Force "$($L.Config)\skills" | Out-Null
