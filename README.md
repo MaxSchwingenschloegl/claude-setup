@@ -200,7 +200,10 @@ records the results in your configuration's `vetting.json`. Commit that file wit
 - **Scan before the first session on a new machine:** `install.ps1`, then `vet-plugins.ps1`, then
   Claude Code. Claude Code can install what `settings.json` enables on its own when a session
   starts (seen in the home folder, see *Things to know*), without asking this tool; switch off
-  in `settings.json` what you do not want before you start it.
+  in `settings.json` what you do not want before you start it. This is a limit of the check, not
+  something it can close: `install.ps1` gates only its own `-InstallPlugins`. The `recommended`
+  template still enables its four plugins, as they are official ones scoring 2 to 13
+  (`plugins/VENDORED.md`); with plugins of your own, scan before you enable them.
 - A score above 50, or a scan that did not cover every file, needs an exception: read every
   finding in the report the script names, and if each one is harmless, add `"approved"` (the
   date) and `"reasons"` to the plugin's entry. An approval holds only for the files it was given
