@@ -139,7 +139,8 @@ Run the dry run first and read it. The installer takes over what you had:
   plugin is installed a second time with project scope for `C:\Users\<name>` (listed in
   `~/.claude/plugins/installed_plugins.json`). Do not remove those with
   `claude plugin uninstall --scope project` from the home folder: the project settings it edits
-  are that same `settings.json`, so it would switch the plugin off everywhere.
+  are that same `settings.json`, so it may switch the plugin off everywhere (not tried for an
+  enabled plugin).
 - **`claude plugin install` and `uninstall` rewrite `settings.json`** with its keys in another
   order, so your configuration can show a long `git diff` although nothing changed but the order.
   If every removed line comes back elsewhere (give or take a trailing comma),
@@ -218,6 +219,8 @@ records the results in your configuration's `vetting.json`. Commit that file wit
   marketplace entry instead of their folder (`"strict": false`). Those fields count toward the
   fingerprint, so a change is noticed, but skillspector scans only the folder: read the entry in
   the marketplace's `.claude-plugin/marketplace.json` yourself.
+- Plugins a project installs for itself (`--scope project` or `--scope local`) are checked by
+  neither script; scan them by hand before you enable them there.
 - Most official plugins have no version of their own and take the marketplace's commit as one,
   which changes with every marketplace update. The fingerprint does not, so an update that left a
   plugin alone needs no new scan.
