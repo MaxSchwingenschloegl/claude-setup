@@ -128,6 +128,24 @@ Run the dry run first and read it. The installer takes over what you had:
   changed copy of it. Your own old one is kept as `settings.json.backup-<time>` in `~/.claude`;
   copy what you want from it (permissions, model, theme) into your configuration's file.
 
+### Things to know
+
+- **Run the installer from a plain PowerShell window,** with every Claude Code session closed. A
+  session that was already running keeps using `~/.claude`, because it started without
+  `CLAUDE_CONFIG_DIR`, and a `/login` in it writes the login into the hub instead of an account
+  (the next install run warns about it). Open a new window before you sign in.
+- **Start Claude Code in a project folder, not in your home folder.** There
+  `~/.claude/settings.json` is also read as the folder's project settings, so every enabled
+  plugin is installed a second time with project scope for `C:\Users\<name>` (listed in
+  `~/.claude/plugins/installed_plugins.json`). Do not remove those with
+  `claude plugin uninstall --scope project` from the home folder: the project settings it edits
+  are that same `settings.json`, so it would switch the plugin off everywhere.
+- **`claude plugin install` and `uninstall` rewrite `settings.json`** with its keys in another
+  order, so your configuration can show a long `git diff` although nothing changed but the order.
+  If every removed line comes back elsewhere (give or take a trailing comma),
+  `git checkout -- settings.json` restores the committed file; if a value changed (a plugin
+  switched on or off), commit it.
+
 ## Choose your configuration
 
 | | `recommended` | `minimal` |
