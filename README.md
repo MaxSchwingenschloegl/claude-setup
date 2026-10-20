@@ -136,7 +136,7 @@ Run the dry run first and read it. The installer takes over what you had:
 | `CLAUDE.md`: evidence before success claims, numbers from executed code, language, skill vetting | yes | a header only |
 | `rules/git.md`: branch first, approval before outward actions, stage by path, no `--no-verify`, no Claude attribution | yes | – |
 | No Claude attribution in commits and pull requests (`attribution`) | yes | – |
-| Plugins: superpowers, feature-dev, code-review, claude-md-management, security-guidance, frontend-design | yes | – |
+| Plugins: feature-dev, code-review, claude-md-management, frontend-design (skillspector 0 to 13) | yes | – |
 | Global skills `grilling` and `grill-me` (an interview that stress-tests a plan) | yes | – |
 | Spinner tips off, unused claude.ai skills off | yes | – |
 | Bash timeouts raised to 5 minutes (default) and 20 minutes (maximum) | yes | yes |
@@ -144,6 +144,19 @@ Run the dry run first and read it. The installer takes over what you had:
 Neither template turns on auto mode (`permissions.defaultMode: "auto"`); Claude asks before acting
 until you decide otherwise. Language, theme, model and effort are left to you: set them with
 `/config` and they land in your `settings.json`.
+
+### Plugins worth a deliberate decision
+
+Two well-known official plugins are not in the template, because skillspector scores both 100 and
+what they do goes beyond reading text. Enable them yourself if you want what they bring:
+
+- **superpowers**: process skills for brainstorming, plans, test-driven development and
+  debugging. Its session-start hook adds about 3.5 KB of instructions to every session that make
+  Claude check for a matching skill before any answer. Very effective, and very insistent.
+- **security-guidance**: a background security review of your edits, commits and pushes, sent to
+  a model as a diff. At session start it installs the `claude-agent-sdk` package from PyPI,
+  unpinned, into `~/.claude/security/` when it is missing. Best enabled per project where the
+  review pays off: `claude plugin install security-guidance@claude-plugins-official --scope local`.
 
 ## Skill groups
 
