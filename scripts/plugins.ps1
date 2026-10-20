@@ -23,6 +23,7 @@ function Get-UserPlugins {
         $record = @($property.Value | Where-Object scope -eq 'user')[0]
         if (-not $record) { continue }
         $path = $record.installPath
+        if (-not $path) { continue }
         $at = $path.IndexOf('\plugins\cache\', [StringComparison]::OrdinalIgnoreCase)
         if ($at -ge 0) { $path = $ClaudeLayout.Hub + $path.Substring($at) }
         $result[$property.Name] = [pscustomobject]@{
@@ -73,17 +74,18 @@ function Read-CaseSensitiveJson([string]$Path) {
     } catch { Write-Warning "Could not read ${Path}: $($_.Exception.Message)"; return @{} }
 }
 
-# Fingerprint of a plugin folder: every file's path and content. Claude Code's lock folder
-# .in_use and carriage returns are left out, so neither a running session nor a checkout with
-# other line endings changes it, and a marketplace update that left the plugin alone keeps it.
+# Fingerprint of a plugin folder: every file's path and content. Claude Code's lock files
+# (.in_use/<process id>) are left out and CRLF counts as LF, so neither a running session nor a
+# checkout with other line endings changes it, and a marketplace update that left the plugin
+# alone keeps it. A lone carriage return still counts: some parsers read it as a line break.
 function Get-PluginHash([string]$Path) {
     $root = (Get-ClaudeFullPath $Path) + '\'
     $latin1 = [Text.Encoding]::GetEncoding(28591)   # maps every byte to one character and back
     $sha = [Security.Cryptography.SHA256]::Create()
     $lines = [string[]]@(foreach ($file in Get-ChildItem -LiteralPath $Path -Recurse -File -Force) {
         $relative = $file.FullName.Substring($root.Length).Replace('\', '/')
-        if ($relative -match '^(\.in_use|\.git)/') { continue }
-        $bytes = $latin1.GetBytes($latin1.GetString([IO.File]::ReadAllBytes($file.FullName)).Replace("`r", ''))
+        if ($relative -cmatch '^\.in_use/\d+$') { continue }
+        $bytes = $latin1.GetBytes($latin1.GetString([IO.File]::ReadAllBytes($file.FullName)).Replace("`r`n", "`n"))
         "$relative $([BitConverter]::ToString($sha.ComputeHash($bytes)).Replace('-', ''))"
     })
     [Array]::Sort($lines, [StringComparer]::Ordinal)
@@ -113,7 +115,7 @@ function Get-PluginVerdict($Entry, [string]$Hash, [string]$Commit) {
     if ($Hash) { if ($Entry.hash -ne $Hash) { return 'changed' } }
     elseif (-not $Commit -or $Entry.commit -ne $Commit) { return 'changed' }
     if ($Entry.approved) { return 'ok' }
-    if ([int]$Entry.score -gt $PluginScoreLimit) { return 'unapproved' }
-    if ($Entry.analysis -and $Entry.analysis -ne 'complete') { return 'incomplete' }
+    if ([double]$Entry.score -gt $PluginScoreLimit) { return 'unapproved' }
+    if ($null -eq $Entry.score -or ($Entry.analysis -and $Entry.analysis -ne 'complete')) { return 'incomplete' }
     return 'ok'
 }

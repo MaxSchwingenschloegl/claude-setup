@@ -50,7 +50,9 @@ $fields = 'version', 'commit', 'hash', 'scanned', 'skillspector', 'provider', 's
 function ConvertTo-JsonText($Value) {
     if ($null -eq $Value) { return 'null' }
     if ($Value -is [bool]) { return $Value.ToString().ToLowerInvariant() }
-    if ($Value -is [int] -or $Value -is [long] -or $Value -is [double]) { return [string]$Value }
+    if ($Value -is [int] -or $Value -is [long] -or $Value -is [double]) { return ([double]$Value).ToString([Globalization.CultureInfo]::InvariantCulture) }
+    # PowerShell 7 reads "2026-10-20" as a date
+    if ($Value -is [datetime]) { $Value = $Value.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture) }
     $text = ([string]$Value).Replace('\', '\\').Replace('"', '\"')
     $text = [regex]::Replace($text, '[\x00-\x1f]', { param($m) '\u{0:x4}' -f [int][char]$m.Value })
     return '"' + $text + '"'
@@ -84,7 +86,7 @@ function Read-Report([string]$Path) {
     $completeness = $report.analysis_completeness
     [pscustomobject]@{
         skillspector   = $report.metadata.skillspector_version
-        score          = [int]$report.risk_assessment.score
+        score          = [double]$report.risk_assessment.score
         recommendation = $report.risk_assessment.recommendation
         issues         = if ($counts) { $counts -join ', ' } else { 'none' }
         analysis       = if ($completeness.status -eq 'complete') { 'complete' }
@@ -125,7 +127,8 @@ foreach ($name in $names) {
         }
         $folder = $source.Folder; $version = 'not installed'; $commit = $null
     }
-    $hash = Get-PluginHash $folder
+    try { $hash = Get-PluginHash $folder }
+    catch { Write-Warning "Could not read the files of ${name}: $($_.Exception.Message)"; continue }
 
     if ($old -and $old.hash -eq $hash -and -not $Force) {
         # Same files as scanned: only the version label may have moved on
@@ -150,7 +153,8 @@ foreach ($name in $names) {
         Write-Warning "skillspector could not scan ${name} (exit code $exitCode): $(@($output | Where-Object { $_ -notmatch 'WARNING \[skillspector' }) -join ' ')"
         continue
     }
-    $result = Read-Report $file
+    try { $result = Read-Report $file }
+    catch { Write-Warning "Could not read the report of ${name} (${file}): $($_.Exception.Message)"; continue }
     if (-not $result.complete) {
         Write-Warning ("${name}: the scan is incomplete ($($result.analysis)). A large plugin can run out of skillspector's " +
                        'time limit, SKILLSPECTOR_MAX_WORKFLOW_SECONDS (600 by default); raise it and scan again with -Force.')
@@ -175,6 +179,7 @@ foreach ($name in $names) {
         }
     }
     $vetting[$name] = $entry
+    Save-Vetting $vetting   # at once: a later failure or Ctrl-C must not cost the scans made so far
     $changed = $true
     $rows += [pscustomobject]@{ Plugin = $name; Version = $version; Score = $entry.score; Verdict = Get-PluginVerdict $entry $hash; Note = "$($entry.issues); report $file" }
 }
