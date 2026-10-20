@@ -448,7 +448,10 @@ $profileFolders = @("$documents\WindowsPowerShell")
 if ((Get-Command pwsh -ErrorAction SilentlyContinue) -or (Test-Path "$documents\PowerShell")) {
     $profileFolders += "$documents\PowerShell"
 }
-$module = "$($L.Root)\shell\claude-accounts.ps1" -replace "['‘’‚‛]", "''"
+# Typographic single quotes end a PowerShell string as well; written as code points, because
+# Windows PowerShell reads a file without a byte order mark in the ANSI code page
+$quotes = "['" + [char]0x2018 + [char]0x2019 + [char]0x201A + [char]0x201B + "]"
+$module = "$($L.Root)\shell\claude-accounts.ps1" -replace $quotes, "''"
 $block = "$begin`r`nif (Test-Path -LiteralPath '$module') { . '$module' }`r`n$end"
 foreach ($folder in $profileFolders) {
     Set-ProfileBlock "$folder\profile.ps1" $block
@@ -466,15 +469,21 @@ if ($policy -in 'Restricted', 'AllSigned') {
     Write-Warning "PowerShell runs no unsigned scripts here ($policy), so profile.ps1 cannot load the account functions. Allow them for your user: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned"
 }
 
-# 5. This repo and a configuration repository: scan every commit for secrets
+# 5. This repo, the configuration and your own marketplaces: scan every commit for secrets.
+#    A repository that already has hooks of its own (husky and the like) keeps them.
 $hooksPath = (Get-ClaudeFullPath "$($L.Root)\.githooks") -replace '\\', '/'
 if (Get-Command git -ErrorAction SilentlyContinue) {
     foreach ($repo in @($L.Root, $L.Config) + $L.Marketplaces) {
         if (-not (Test-Path "$repo\.git")) { continue }
-        if ((git -C $repo config core.hooksPath) -ne $hooksPath) {
-            Write-Step "enable the secret scan hook for $repo"
-            if (-not $DryRun) { git -C $repo config core.hooksPath $hooksPath }
+        $current = git -C $repo config core.hooksPath
+        if ($current -eq $hooksPath) { continue }
+        $ours = -not $current -or $current -eq '.githooks' -or $current -match '/\.githooks$'
+        if (-not $ours) {
+            Write-Warning "$repo uses its own git hooks ($current); the secret scan is not added there."
+            continue
         }
+        Write-Step "enable the secret scan hook for $repo"
+        if (-not $DryRun) { git -C $repo config core.hooksPath $hooksPath }
     }
 }
 

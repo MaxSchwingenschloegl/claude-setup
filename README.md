@@ -37,8 +37,9 @@ this repo
   `settings.json` (for `/config`, plugin switches, "always allow") by replacing the file at the
   end of one link, so a direct link survives that and the change shows up in your `git diff`.
 - The user environment variable `CLAUDE_CONFIG_DIR` points to the default account, so plain
-  `claude` and the VS Code extension use it. `claude-<account>` starts Claude Code with another
-  account, `code-<account>` opens VS Code with its own profile for that account.
+  `claude` and the VS Code extension use it. `claude-<account>` starts Claude Code with any
+  account; `code-<account>`, defined for every account but the default one, opens VS Code with
+  its own profile for that account.
 - Every new shell checks the default account's links, and `claude-<account>` checks that
   account's, with a warning when one has turned into a plain file.
 
@@ -56,6 +57,10 @@ this repo
   [skillspector](https://github.com/NVIDIA/skillspector) to scan skills before installing them
 
 ## Install
+
+Keep both repositories outside OneDrive or another sync folder: links into a folder that a sync
+client moves or replaces break. If Windows redirects your Documents folder to OneDrive, use
+`C:\dev` or similar instead of `$HOME\Documents\GitHub` below.
 
 ```powershell
 git clone https://github.com/MaxSchwingenschloegl/claude-setup.git $HOME\Documents\GitHub\claude-setup
@@ -80,13 +85,10 @@ cd $HOME\Documents\GitHub\claude-setup
    then `/login`.
 
 `install.ps1` remembers the configuration folder (user environment variable
-`CLAUDE_SETUP_CONFIG`), is safe to run again at any time and is also the repair tool when a link
-warning shows up. Plugins your `settings.json` enables but this machine does not have yet are
-listed; look at them, then `.\install.ps1 -InstallPlugins` installs them.
-
-Keep both repositories outside OneDrive or another sync folder: links into a folder that a sync
-client moves or replaces break. If Windows redirects your Documents folder to OneDrive, clone to
-`C:\dev` or similar instead.
+`CLAUDE_SETUP_CONFIG`) from the moment it creates or installs one, is safe to run again at any time
+and is also the repair tool when a link warning shows up. Plugins your `settings.json` enables but
+this machine does not have yet are listed; look at them, then `.\install.ps1 -InstallPlugins`
+installs them.
 
 ### Accounts
 
@@ -131,7 +133,7 @@ Run the dry run first and read it. The installer takes over what you had:
 | Telemetry, error reports, `/bug`, feedback survey off | yes | yes |
 | Transcripts kept 90 days (default 30) | yes | yes |
 | Deny rules for secret files | yes | yes |
-| `CLAUDE.md`: evidence before success claims, numbers from executed code, language, skill vetting | yes | empty |
+| `CLAUDE.md`: evidence before success claims, numbers from executed code, language, skill vetting | yes | a header only |
 | `rules/git.md`: branch first, approval before outward actions, stage by path, no `--no-verify`, no Claude attribution | yes | – |
 | No Claude attribution in commits and pull requests (`attribution`) | yes | – |
 | Plugins: superpowers, feature-dev, code-review, claude-md-management, security-guidance, frontend-design | yes | – |
@@ -221,7 +223,8 @@ you like. Security problems, a way around the secret guard included, go privatel
 Nothing secret goes into this repo or your configuration: logins (`.credentials.json`) are
 created by `/login` per account and machine; tokens and API keys belong in environment variables,
 the Windows Credential Manager or a file outside the repositories. With gitleaks installed, the
-pre-commit hook scans every commit in this repo, your configuration and your own marketplaces;
+pre-commit hook scans every commit in this repo, your configuration and your own marketplaces (a
+repository with git hooks of its own, such as husky, keeps them and gets a warning instead);
 without gitleaks it only warns. It does not run for `--no-verify`, merges, rebases and
 cherry-picks, and it is found through an absolute path, so after moving this repo run
 `install.ps1` again. A finding you have reviewed and judged harmless goes into `.gitleaksignore`.
