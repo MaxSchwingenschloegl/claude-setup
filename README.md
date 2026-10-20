@@ -157,7 +157,7 @@ Run the dry run first and read it. The installer takes over what you had:
 | `CLAUDE.md`: evidence before success claims, numbers from executed code, language, skill vetting | yes | a header only |
 | `rules/git.md`: branch first, approval before outward actions, stage by path, no `--no-verify`, no Claude attribution | yes | – |
 | No Claude attribution in commits and pull requests (`attribution`) | yes | – |
-| Plugins: feature-dev, code-review, claude-md-management, frontend-design (skillspector 0 to 13) | yes | – |
+| Plugins: feature-dev, code-review, claude-md-management, frontend-design (skillspector 2 to 13, `plugins/VENDORED.md`) | yes | – |
 | Global skills `grilling` and `grill-me` (an interview that stress-tests a plan) | yes | – |
 | Spinner tips off, unused claude.ai skills off | yes | – |
 | Bash timeouts raised to 5 minutes (default) and 20 minutes (maximum) | yes | yes |

@@ -106,6 +106,24 @@ Not taken: `grill-with-docs` (its ADR and glossary files clash with each repo's 
 `tdd` (superpowers has it), and `find-skills` from vercel-labs/skills (it installs skills without
 the skillspector scan).
 
+## Marketplace plugins in the `recommended` template
+
+`templates/recommended/settings.json` enables four official plugins from `claude-plugins-official`.
+They are not vendored here, so `scripts/vet-plugins.ps1` scans them on your machine and records
+the result in your own `vetting.json`. For reference, the repository owner's scan with
+skillspector 2.12.0 and the `claude_cli` provider on 2026-10-20, every report complete:
+
+| Plugin | Version | Score | Recommendation | Findings |
+|---|---|---|---|---|
+| frontend-design | e68e375d2286 | 13 | SAFE | 1 high, a false positive: "Errors don't apologize" (`SKILL.md:69`) is advice for error messages in an interface, read as an anti-refusal statement |
+| code-review | e68e375d2286 | 6 | SAFE | 1 medium: step 8 posts the review as a comment on the pull request (`gh pr comment`) without asking first |
+| feature-dev | e68e375d2286 | 3 | SAFE | 2 low: the read-only agents `code-architect` and `code-explorer` are given `KillShell` and `BashOutput` |
+| claude-md-management | 1.0.0 | 2 | SAFE | 1 low: the audit rubric says to run the commands a CLAUDE.md documents "mentally or actually", without asking first |
+
+Scores of the same files vary by a few points between runs, as part of the analysis is done by a
+model. `superpowers` (100) and `security-guidance` (100) are not in the template; the README
+(*Plugins worth a deliberate decision*) says why and what they do.
+
 ## Updating
 
 1. Clone upstream at the new commit into an empty scratch folder.
