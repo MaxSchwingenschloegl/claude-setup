@@ -4,6 +4,11 @@
 # account's links on every shell start. Plain `claude` uses the default account through the
 # user environment variable CLAUDE_CONFIG_DIR.
 
+# A terminal that was already running when install.ps1 set the variable hands its old
+# environment to every new tab, so read the user's value directly when it is missing
+if (-not $env:CLAUDE_SETUP_CONFIG) {
+    $env:CLAUDE_SETUP_CONFIG = [Environment]::GetEnvironmentVariable('CLAUDE_SETUP_CONFIG', 'User')
+}
 try { . (Join-Path (Split-Path -Parent $PSScriptRoot) 'scripts\common.ps1') }
 catch { Write-Warning "Claude setup: $($_.Exception.Message)"; return }
 
