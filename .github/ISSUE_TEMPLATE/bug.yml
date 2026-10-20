@@ -1,0 +1,41 @@
+name: Bug report
+description: Something in the installer, the account functions, the secret guard or the status line does not work as described.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. Answered when time allows; pull requests are not accepted.
+        **A way around the secret guard is a security issue:** report it privately under
+        Security > Report a vulnerability, not here.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: The commands you ran. Output of `.\install.ps1 -DryRun` helps a lot. Remove anything personal or secret first.
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      description: Windows version, PowerShell version (`$PSVersionTable.PSVersion`), Claude Code version (`claude --version`)
+      placeholder: Windows 11 24H2, PowerShell 5.1, Claude Code 2.1.304
+    validations:
+      required: true
+  - type: dropdown
+    id: template
+    attributes:
+      label: Configuration template
+      options:
+        - recommended
+        - minimal
+        - my own

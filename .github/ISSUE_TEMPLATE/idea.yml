@@ -1,0 +1,20 @@
+name: Idea
+description: "Something that would make the setup better: a default, a skill group, a check, the documentation."
+labels: [idea]
+body:
+  - type: markdown
+    attributes:
+      value: Ideas are welcome and read; not every one will be built. Pull requests are not accepted.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What is missing or awkward
+      description: The situation in which you missed it, rather than the solution first.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your idea
+    validations:
+      required: true

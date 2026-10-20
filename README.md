@@ -209,8 +209,12 @@ the ones you no longer need. Files the installer kept as `*.backup-*` are yours 
 ## Licence and contributions
 
 MIT (`LICENSE`) for this repo's own code; the vendored skills keep their own MIT licences next to
-them. Issues and pull requests are switched off: fork the repository, adapt it, and keep your
-fork in sync with `git pull` from here if you like.
+them.
+
+Issues are welcome, for bugs and ideas, and answered when time allows. Pull requests are not
+accepted: fork the repository, adapt it, and keep your fork in sync with `git pull` from here if
+you like. Security problems, a way around the secret guard included, go privately through
+**Security > Report a vulnerability** (`SECURITY.md`).
 
 ## Secrets
 
