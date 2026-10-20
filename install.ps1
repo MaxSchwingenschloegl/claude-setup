@@ -19,8 +19,10 @@
 .PARAMETER DryRun
     Show what would change without changing anything.
 .PARAMETER InstallPlugins
-    Also install the plugins settings.json enables but this machine does not have yet. Without it
-    they are only listed, so nothing that runs code is installed before you looked at it.
+    Also install the plugins settings.json enables but this machine does not have yet, as far as
+    the configuration's vetting.json holds a skillspector scan of exactly what the marketplace
+    would install (scripts\vet-plugins.ps1). Without it they are only listed, so nothing that
+    runs code is installed before you looked at it.
 .PARAMETER Uninstall
     Undo the setup: every link becomes a plain copy of what it pointed to, the profile block,
     the environment variables and the marketplace registrations go. Logins, transcripts and the
@@ -70,6 +72,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $ConfigDir 'accounts.json'))) {
 }
 $env:CLAUDE_SETUP_CONFIG = $ConfigDir
 . "$PSScriptRoot\scripts\common.ps1"
+. "$PSScriptRoot\scripts\plugins.ps1"
 $L = $ClaudeLayout
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $changes = 0
@@ -197,14 +200,6 @@ function Set-Link([string]$Path, [string]$Target, [string]$Kind, [switch]$Adopt,
         if ($Kind -eq 'SymbolicLink') { New-FileSymlink $Path $Target }
         else { New-Item -ItemType Junction -Path $Path -Target $Target | Out-Null }
     }
-}
-
-# Reads a JSON file of Claude Code; a missing or unreadable file counts as empty, so a damaged
-# cache cannot stop the run halfway
-function Read-JsonFile([string]$Path) {
-    if (-not (Test-Path -LiteralPath $Path)) { return $null }
-    try { return Get-Content -Raw -Encoding UTF8 -LiteralPath $Path | ConvertFrom-Json }
-    catch { Write-Warning "Could not read ${Path}: $($_.Exception.Message)"; return $null }
 }
 
 # Profiles without a byte order mark may be UTF-8 or the ANSI code page
@@ -528,32 +523,60 @@ foreach ($account in $L.Accounts) {
 
 # 7. Plugins: what is installed for all projects is also enabled in the configuration's settings.json.
 #    Plugins a project installs and enables for itself are its own business.
-#    Plugins enabled there but not installed yet are listed; -InstallPlugins installs them.
+#    Every enabled plugin should have a skillspector scan of exactly its files in the
+#    configuration's vetting.json (scripts\vet-plugins.ps1). Plugins enabled but not installed
+#    yet are listed; -InstallPlugins installs those whose scan matches what the marketplace holds.
 #    Not by default: a plugin runs code, and what gets installed is your decision, after a look.
-$installed = (Read-JsonFile "$($L.Hub)\plugins\installed_plugins.json").plugins
-$userScope = @(if ($installed) {
-    $installed.PSObject.Properties | Where-Object { @($_.Value | Where-Object scope -eq 'user').Count } | ForEach-Object Name
-})
-$enabledList = (Read-JsonFile "$($L.Config)\settings.json").enabledPlugins
-$enabled = @(if ($enabledList) { $enabledList.PSObject.Properties | Where-Object Value | ForEach-Object Name })
-$idle = @($userScope | Where-Object { $enabled -notcontains $_ })
+$verdictText = @{
+    ok = 'scanned'; unvetted = 'not scanned'; changed = 'changed since the scan'
+    unapproved = "score above $PluginScoreLimit, not approved"; unknown = 'marketplace not on this machine'
+}
+$enabled = Get-EnabledPlugins
+$vetting = Read-PluginVetting
+$userPlugins = Get-UserPlugins
+$idle = @($userPlugins.Keys | Where-Object { $enabled -notcontains $_ -and $_ -notlike '*@synced' })
 if ($idle.Count) {
     Write-Warning "Installed for all projects but not enabled in settings.json: $($idle -join ', '). Enable them there or run: claude plugin uninstall <name>"
 }
-$missing = @($enabled | Where-Object { $userScope -notcontains $_ -and $_ -notlike '*@synced' })
-if ($missing.Count -and -not $InstallPlugins) {
-    Write-Host "Enabled in settings.json but not installed: $($missing -join ', ')." -ForegroundColor Cyan
-    Write-Host '  Look at them first, then run .\install.ps1 -InstallPlugins (or claude plugin install <name>).' -ForegroundColor Cyan
-    $missing = @()
+$installable = @(); $blocked = @(); $notInstalled = @()
+foreach ($plugin in @($enabled | Where-Object { -not $userPlugins.Contains($_) })) {
+    $source = Get-PluginSource $plugin
+    $verdict = if (-not $source) { 'unknown' }
+               elseif ($source.Folder) { Get-PluginVerdict $vetting[$plugin] (Get-PluginHash $source.Folder) }
+               else { Get-PluginVerdict $vetting[$plugin] $null $source.Commit }
+    if ($verdict -eq 'ok') { $installable += $plugin } else { $blocked += "$plugin ($($verdictText[$verdict]))" }
+    $notInstalled += "$plugin ($($verdictText[$verdict]))"
 }
-foreach ($plugin in $missing) {
-    Write-Step "install the plugin $plugin, enabled in settings.json"
+if ($notInstalled.Count -and -not $InstallPlugins) {
+    Write-Host "Enabled in settings.json but not installed: $($notInstalled -join ', ')." -ForegroundColor Cyan
+    Write-Host '  Scan them with scripts\vet-plugins.ps1 and look at the result; .\install.ps1 -InstallPlugins then installs the scanned ones.' -ForegroundColor Cyan
+    $installable = @()
+} elseif ($blocked.Count) {
+    Write-Warning "Not installed, no matching scan in vetting.json: $($blocked -join ', '). Run scripts\vet-plugins.ps1 first."
+}
+foreach ($plugin in $installable) {
+    Write-Step "install the plugin $plugin, enabled in settings.json and scanned"
     if ($DryRun) { continue }
     if (-not (Get-Command claude -ErrorAction SilentlyContinue)) { Write-Warning 'Claude Code is not installed yet; run install.ps1 again afterwards.'; break }
     $ErrorActionPreference = 'Continue'
     $output = claude plugin install $plugin --scope user 2>&1
     if ($LASTEXITCODE) { Write-Warning "Could not install ${plugin}: $output" }
     $ErrorActionPreference = 'Stop'
+}
+# Installed plugins, the ones just installed included: the marketplace may have moved on
+# between the scan and the install
+if ($installable.Count -and -not $DryRun) { $userPlugins = Get-UserPlugins }
+$open = [ordered]@{ unvetted = @(); changed = @(); unapproved = @() }
+foreach ($plugin in @($enabled | Where-Object { $userPlugins.Contains($_) })) {
+    $folder = $userPlugins[$plugin].Folder
+    if (-not (Test-Path -LiteralPath $folder)) { Write-Warning "The files of $plugin are missing ($folder); reinstall it."; continue }
+    $verdict = Get-PluginVerdict $vetting[$plugin] (Get-PluginHash $folder)
+    if ($verdict -ne 'ok') { $open[$verdict] += $plugin }
+}
+foreach ($verdict in @($open.Keys)) {
+    if ($open[$verdict].Count) {
+        Write-Warning "Enabled plugins, $($verdictText[$verdict]): $($open[$verdict] -join ', '). Run scripts\vet-plugins.ps1 (README, ""Vetting plugins"")."
+    }
 }
 
 if (-not $changes) {

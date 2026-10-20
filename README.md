@@ -5,9 +5,9 @@ only its own login; rules, settings, plugins, history and memory are shared. A f
 set up with two clones and one script.
 
 **What lives here:** the tools: the installer (`install.ps1`), the PowerShell functions that
-switch accounts (`shell/`, `scripts/`), a secret guard (`hooks/`), a status line
-(`statusline/`), skill groups as plugins you enable per project (`plugins/`) and two templates
-for your own configuration (`templates/`).
+switch accounts (`shell/`, `scripts/`), a plugin scan (`scripts/vet-plugins.ps1`), a secret
+guard (`hooks/`), a status line (`statusline/`), skill groups as plugins you enable per project
+(`plugins/`) and two templates for your own configuration (`templates/`).
 **What never lives here:** your configuration. Accounts, settings, rules and global skills live
 in a folder of your own, ideally a private git repository, which `install.ps1` links into every
 account. Logins, tokens, transcripts and memory stay on each machine.
@@ -87,8 +87,8 @@ cd $HOME\Documents\GitHub\claude-setup
 `install.ps1` remembers the configuration folder (user environment variable
 `CLAUDE_SETUP_CONFIG`) from the moment it creates or installs one, is safe to run again at any time
 and is also the repair tool when a link warning shows up. Plugins your `settings.json` enables but
-this machine does not have yet are listed; look at them, then `.\install.ps1 -InstallPlugins`
-installs them.
+this machine does not have yet are listed; scan them (*Vetting plugins*), then
+`.\install.ps1 -InstallPlugins` installs the scanned ones.
 
 ### Accounts
 
@@ -157,6 +157,32 @@ what they do goes beyond reading text. Enable them yourself if you want what the
   a model as a diff. At session start it installs the `claude-agent-sdk` package from PyPI,
   unpinned, into `~/.claude/security/` when it is missing. Best enabled per project where the
   review pays off: `claude plugin install security-guidance@claude-plugins-official --scope local`.
+
+## Vetting plugins
+
+A plugin runs with your permissions: its skills steer Claude, its hooks and MCP servers run code.
+`scripts\vet-plugins.ps1` scans every plugin your `settings.json` enables, and every plugin
+installed for all projects, with [skillspector](https://github.com/NVIDIA/skillspector) and
+records the results in your configuration's `vetting.json`. Commit that file with the rest.
+
+```powershell
+.\scripts\vet-plugins.ps1                       # all of them; plugins scanned before and unchanged are skipped
+.\scripts\vet-plugins.ps1 -Plugin superpowers   # only this one
+.\scripts\vet-plugins.ps1 -Force                # scan again although nothing changed
+```
+
+- Each entry holds the version, a fingerprint of the plugin's files, the date, the score, the
+  recommendation and the findings by severity. A plugin that is not installed yet is scanned in
+  the local copy of its marketplace, before it ever runs.
+- A score above 50 needs an exception: read every finding in the report the script names, and if
+  each one is harmless, add `"approved"` (the date) and `"reasons"` to the plugin's entry. An
+  approval holds only for the files it was given for; when they change, the next scan drops it.
+- `install.ps1` warns about every enabled plugin without a scan, changed since its scan, or above
+  50 without an approval. `-InstallPlugins` installs only plugins whose scan matches what the
+  marketplace would install.
+- Most official plugins have no version of their own and take the marketplace's commit as one,
+  which changes with every marketplace update. The fingerprint does not, so an update that left a
+  plugin alone needs no new scan.
 
 ## Skill groups
 
