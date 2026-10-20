@@ -206,6 +206,12 @@ two environment variables, the marketplace registrations and the commit hook go.
 then uses `~/.claude` again; sign in there once. The account folders keep their logins; delete
 the ones you no longer need. Files the installer kept as `*.backup-*` are yours to restore.
 
+## Licence and contributions
+
+MIT (`LICENSE`) for this repo's own code; the vendored skills keep their own MIT licences next to
+them. Issues and pull requests are switched off: fork the repository, adapt it, and keep your
+fork in sync with `git pull` from here if you like.
+
 ## Secrets
 
 Nothing secret goes into this repo or your configuration: logins (`.credentials.json`) are
