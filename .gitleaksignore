@@ -1,0 +1,3 @@
+# Findings reviewed and judged harmless. One fingerprint per line.
+# Fake ElevenLabs key in an upstream eval case that tests careful key handling (vendored, see plugins/VENDORED.md)
+plugins/growth/skills/video/evals/evals.json:generic-api-key:104

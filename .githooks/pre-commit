@@ -1,0 +1,6 @@
+#!/bin/sh
+# Blocks a commit that contains a secret. install.ps1 enables this hook (core.hooksPath).
+if command -v gitleaks >/dev/null 2>&1; then
+  exec gitleaks git --staged --redact --no-banner
+fi
+echo "pre-commit: gitleaks not found, secret scan skipped (install: winget install Gitleaks.Gitleaks)" >&2

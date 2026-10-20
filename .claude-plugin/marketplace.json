@@ -1,0 +1,26 @@
+{
+  "name": "claude-setup",
+  "owner": {
+    "name": "MaxSchwingenschloegl"
+  },
+  "metadata": {
+    "description": "Curated skill groups that are enabled per project, never globally"
+  },
+  "plugins": [
+    {
+      "name": "dev",
+      "source": "./plugins/dev",
+      "description": "Codebase architecture: deepening opportunities, module design, domain model and ADRs"
+    },
+    {
+      "name": "web",
+      "source": "./plugins/web",
+      "description": "Websites: SEO, AI search, structured data, site architecture, analytics, copywriting and conversion"
+    },
+    {
+      "name": "growth",
+      "source": "./plugins/growth",
+      "description": "Marketing for clients: campaigns, ads, email, sales, pricing, launches, retention and social"
+    }
+  ]
+}

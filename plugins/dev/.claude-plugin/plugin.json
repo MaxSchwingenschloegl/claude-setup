@@ -1,0 +1,8 @@
+{
+  "name": "dev",
+  "version": "1.0.0",
+  "description": "Codebase architecture: find deepening opportunities, design modules twice, keep the domain model and ADRs current. Vendored from mattpocock/skills (MIT), see VENDORED.md.",
+  "author": {
+    "name": "MaxSchwingenschloegl"
+  }
+}

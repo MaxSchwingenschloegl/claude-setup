@@ -1,0 +1,3 @@
+# Backups install.ps1 keeps when it replaces a file, and machine-local settings
+*.backup-*
+*.local.*

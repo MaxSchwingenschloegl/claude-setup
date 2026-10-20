@@ -1,0 +1,14 @@
+# Logins and secrets never belong here; keep them in the account folders, environment
+# variables or the Windows Credential Manager
+.credentials.json
+*.credentials.json
+.env
+.env.*
+*.secret
+*.local.*
+
+# Backups install.ps1 makes when it replaces a file
+*.backup-*
+
+# Crash dumps of Git Bash
+*.stackdump
