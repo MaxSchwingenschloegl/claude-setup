@@ -53,8 +53,8 @@ this repo
   symlinks. The installer checks this before it changes anything.
 - PowerShell allowed to run scripts: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
 - Recommended: [gitleaks](https://github.com/gitleaks/gitleaks) (`winget install Gitleaks.Gitleaks`)
-  for the secret scan on every commit; optional:
-  [skillspector](https://github.com/NVIDIA/skillspector) to scan skills before installing them
+  for the secret scan on every commit, and [skillspector](https://github.com/NVIDIA/skillspector)
+  to scan plugins and skills before installing them (with uv; see *Vetting plugins*)
 
 ## Install
 
@@ -204,6 +204,23 @@ records the results in your configuration's `vetting.json`. Commit that file wit
 - Most official plugins have no version of their own and take the marketplace's commit as one,
   which changes with every marketplace update. The fingerprint does not, so an update that left a
   plugin alone needs no new scan.
+
+skillspector itself, and how to get scans comparable with the scores in `vetting.json` and
+`plugins/VENDORED.md`:
+
+- Install it with [uv](https://docs.astral.sh/uv/): `winget install astral-sh.uv`, then
+  `uv tool install git+https://github.com/NVIDIA/skillspector.git`.
+- Its semantic analysis needs an LLM. `SKILLSPECTOR_PROVIDER=claude_cli` uses your local `claude`
+  CLI, without an API key; every call counts against your plan. Without a provider the three
+  semantic analyzers fail with `No LLM API key configured` and only the static score is reported,
+  which for one plugin meant 100 without any review of its findings. `vet-plugins.ps1` uses
+  `claude_cli` unless you set another provider; for scans by hand set it for your user,
+  `[Environment]::SetEnvironmentVariable('SKILLSPECTOR_PROVIDER', 'claude_cli', 'User')`, and check
+  that the report's semantic analysis says completed.
+- Scan installed plugins through `~/.claude/plugins`, not through an account folder: `plugins`
+  there is a junction to the hub, and skillspector refuses it with `Refusing to resolve input
+  with a symlinked parent`. Pass absolute paths: `Cannot determine input type` means the path
+  does not exist, often a relative one taken from the wrong folder.
 
 ## Skill groups
 
