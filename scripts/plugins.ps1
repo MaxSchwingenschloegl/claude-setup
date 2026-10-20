@@ -40,24 +40,55 @@ function Get-EnabledPlugins {
     @(if ($list) { $list.PSObject.Properties | Where-Object { $_.Value -and $_.Name -notlike '*@synced' } | ForEach-Object Name })
 }
 
-# Where a plugin that is not installed yet would be installed from: a folder in the local copy
-# of its marketplace, or a commit of a remote repository. Empty when neither is known here.
-function Get-PluginSource([string]$Name) {
+# A plugin's entry in the local copy of its marketplace, with the folder of that copy (through
+# the hub, like the install paths). Empty when the marketplace or the entry is not known here.
+$MarketplaceCache = @{}
+function Get-MarketplaceEntry([string]$Name) {
     $plugin, $market = $Name -split '@', 2
     $known = Read-JsonFile "$($ClaudeLayout.Hub)\plugins\known_marketplaces.json"
     $location = if ($known -and $market) { $known.$market.installLocation }
     if (-not $location) { return $null }
-    $entry = @((Read-CaseSensitiveJson "$location\.claude-plugin\marketplace.json")['plugins'] |
-               Where-Object { $_['name'] -eq $plugin })[0]
+    $at = $location.IndexOf('\plugins\marketplaces\', [StringComparison]::OrdinalIgnoreCase)
+    if ($at -ge 0) { $location = $ClaudeLayout.Hub + $location.Substring($at) }
+    if (-not $MarketplaceCache.Contains($location)) {
+        $MarketplaceCache[$location] = (Read-CaseSensitiveJson "$location\.claude-plugin\marketplace.json")['plugins']
+    }
+    $entry = @($MarketplaceCache[$location] | Where-Object { $_['name'] -eq $plugin })[0]
     if (-not $entry) { return $null }
-    $source = $entry['source']
+    return [pscustomobject]@{ Location = $location; Entry = $entry }
+}
+
+# Where a plugin that is not installed yet would be installed from: a folder in the local copy
+# of its marketplace, or a pinned commit of a remote repository (Unpinned when it names none).
+# Empty when its marketplace is not known here.
+function Get-PluginSource([string]$Name) {
+    $found = Get-MarketplaceEntry $Name
+    if (-not $found) { return $null }
+    $source = $found.Entry['source']
     if ($source -is [string]) {
-        $folder = [IO.Path]::GetFullPath((Join-Path $location $source))
-        if (Test-Path -LiteralPath $folder) { return [pscustomobject]@{ Folder = $folder; Commit = $null } }
+        $folder = [IO.Path]::GetFullPath((Join-Path $found.Location $source))
+        if (Test-Path -LiteralPath $folder) { return [pscustomobject]@{ Folder = $folder; Commit = $null; Unpinned = $false } }
         return $null
     }
-    if ($source -and $source['sha']) { return [pscustomobject]@{ Folder = $null; Commit = $source['sha'] } }
-    return $null
+    $sha = if ($source) { $source['sha'] }
+    return [pscustomobject]@{ Folder = $null; Commit = $sha; Unpinned = -not $sha }
+}
+
+# Entry fields that load or run something. With "strict": false a plugin's hooks, servers and
+# commands live there instead of in its folder, so they belong to its fingerprint.
+$MarketplaceComponentFields = 'commands', 'agents', 'skills', 'hooks', 'mcpServers', 'lspServers', 'outputStyles'
+
+# JSON with sorted keys, so the same entry always gives the same text
+function ConvertTo-CanonicalJson($Value) {
+    if ($null -eq $Value) { return 'null' }
+    if ($Value -is [string]) { return '"' + $Value.Replace('\', '\\').Replace('"', '\"') + '"' }
+    if ($Value -is [bool]) { return $Value.ToString().ToLowerInvariant() }
+    if ($Value -is [Collections.IDictionary]) {
+        $keys = [string[]]@($Value.Keys); [Array]::Sort($keys, [StringComparer]::Ordinal)
+        return '{' + (@(foreach ($key in $keys) { (ConvertTo-CanonicalJson $key) + ':' + (ConvertTo-CanonicalJson $Value[$key]) }) -join ',') + '}'
+    }
+    if ($Value -is [Collections.IEnumerable]) { return '[' + (@(foreach ($item in $Value) { ConvertTo-CanonicalJson $item }) -join ',') + ']' }
+    return ([IFormattable]$Value).ToString($null, [Globalization.CultureInfo]::InvariantCulture)
 }
 
 # A marketplace manifest may hold keys that differ only in case (".c" and ".C" for the C and
@@ -78,7 +109,8 @@ function Read-CaseSensitiveJson([string]$Path) {
 # (.in_use/<process id>) are left out and CRLF counts as LF, so neither a running session nor a
 # checkout with other line endings changes it, and a marketplace update that left the plugin
 # alone keeps it. A lone carriage return still counts: some parsers read it as a line break.
-function Get-PluginHash([string]$Path) {
+# The fields of the marketplace entry $Name that load or run something count too.
+function Get-PluginHash([string]$Path, [string]$Name) {
     $root = (Get-ClaudeFullPath $Path) + '\'
     $latin1 = [Text.Encoding]::GetEncoding(28591)   # maps every byte to one character and back
     $sha = [Security.Cryptography.SHA256]::Create()
@@ -88,6 +120,13 @@ function Get-PluginHash([string]$Path) {
         $bytes = $latin1.GetBytes($latin1.GetString([IO.File]::ReadAllBytes($file.FullName)).Replace("`r`n", "`n"))
         "$relative $([BitConverter]::ToString($sha.ComputeHash($bytes)).Replace('-', ''))"
     })
+    $entry = if ($Name) { (Get-MarketplaceEntry $Name).Entry }
+    $components = [ordered]@{}
+    foreach ($field in $MarketplaceComponentFields) { if ($entry -and $entry.ContainsKey($field)) { $components[$field] = $entry[$field] } }
+    if ($components.Count) {
+        $bytes = [Text.Encoding]::UTF8.GetBytes((ConvertTo-CanonicalJson $components))
+        $lines = [string[]]($lines + ":marketplace-entry $([BitConverter]::ToString($sha.ComputeHash($bytes)).Replace('-', ''))")
+    }
     [Array]::Sort($lines, [StringComparer]::Ordinal)
     $digest = $sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($lines -join "`n"))
     return [BitConverter]::ToString($digest).Replace('-', '').ToLowerInvariant()
@@ -110,11 +149,12 @@ function Read-PluginVetting {
 #   changed     the content differs from what was scanned
 #   unapproved  score above the limit and no approval recorded
 #   incomplete  the scan did not cover every file and no approval recorded
+# An approval is a date (yyyy-MM-dd); anything else, "false" included, is none.
 function Get-PluginVerdict($Entry, [string]$Hash, [string]$Commit) {
     if (-not $Entry) { return 'unvetted' }
     if ($Hash) { if ($Entry.hash -ne $Hash) { return 'changed' } }
     elseif (-not $Commit -or $Entry.commit -ne $Commit) { return 'changed' }
-    if ($Entry.approved) { return 'ok' }
+    if ($Entry.approved -is [datetime] -or "$($Entry.approved)" -match '^\d{4}-\d{2}-\d{2}$') { return 'ok' }
     if ([double]$Entry.score -gt $PluginScoreLimit) { return 'unapproved' }
     if ($null -eq $Entry.score -or ($Entry.analysis -and $Entry.analysis -ne 'complete')) { return 'incomplete' }
     return 'ok'

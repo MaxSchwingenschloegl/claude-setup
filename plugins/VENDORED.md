@@ -115,9 +115,9 @@ skillspector 2.12.0 and the `claude_cli` provider on 2026-10-20, every report co
 
 | Plugin | Version | Score | Recommendation | Findings |
 |---|---|---|---|---|
-| frontend-design | e68e375d2286 | 13 | SAFE | 1 high, a false positive: "Errors don't apologize" (`SKILL.md:69`) is advice for error messages in an interface, read as an anti-refusal statement |
-| code-review | e68e375d2286 | 6 | SAFE | 1 medium: step 8 posts the review as a comment on the pull request (`gh pr comment`) without asking first |
-| feature-dev | e68e375d2286 | 3 | SAFE | 2 low: the read-only agents `code-architect` and `code-explorer` are given `KillShell` and `BashOutput` |
+| frontend-design | e68e375d2286 | 13 | SAFE | 1 high, a false positive: "Errors don't apologize" (`SKILL.md:69`) is advice for error messages in an interface, read as an instruction to leave out warnings |
+| code-review | e68e375d2286 | 6 | SAFE | 1 medium: step 8 tells the agent to "use the gh bash command to comment back on the pull request", without asking first |
+| feature-dev | e68e375d2286 | 3 | SAFE | 2 low: the read-only agents `code-architect` and `code-explorer` are given `KillShell` and `BashOutput` (`code-reviewer` has the same tools and was not flagged) |
 | claude-md-management | 1.0.0 | 2 | SAFE | 1 low: the audit rubric says to run the commands a CLAUDE.md documents "mentally or actually", without asking first |
 
 Scores of the same files vary by a few points between runs, as part of the analysis is done by a

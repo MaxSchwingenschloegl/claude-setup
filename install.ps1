@@ -538,7 +538,13 @@ foreach ($account in $L.Accounts) {
 $verdictText = @{
     ok = 'scanned'; unvetted = 'not scanned'; changed = 'changed since the scan'
     unapproved = "score above $PluginScoreLimit, not approved"; incomplete = 'scan incomplete, not approved'
-    unknown = 'marketplace not on this machine'
+    unknown = 'marketplace not on this machine'; unpinned = 'remote source without a pinned commit'
+    unreadable = 'files could not be read'
+}
+# The verdict for a plugin folder; a file that cannot be read counts as not vetted
+function Get-FolderVerdict([string]$Plugin, [string]$Folder) {
+    try { return Get-PluginVerdict $vetting[$Plugin] (Get-PluginHash $Folder $Plugin) }
+    catch { Write-Warning "Could not read the files of ${Plugin}: $($_.Exception.Message)"; return 'unreadable' }
 }
 $enabled = Get-EnabledPlugins
 $vetting = Read-PluginVetting
@@ -551,7 +557,8 @@ $installable = @(); $blocked = @(); $notInstalled = @()
 foreach ($plugin in @($enabled | Where-Object { -not $userPlugins.Contains($_) })) {
     $source = Get-PluginSource $plugin
     $verdict = if (-not $source) { 'unknown' }
-               elseif ($source.Folder) { Get-PluginVerdict $vetting[$plugin] (Get-PluginHash $source.Folder) }
+               elseif ($source.Folder) { Get-FolderVerdict $plugin $source.Folder }
+               elseif ($source.Unpinned) { 'unpinned' }
                else { Get-PluginVerdict $vetting[$plugin] $null $source.Commit }
     if ($verdict -eq 'ok') { $installable += $plugin } else { $blocked += "$plugin ($($verdictText[$verdict]))" }
     $notInstalled += "$plugin ($($verdictText[$verdict]))"
@@ -575,16 +582,17 @@ foreach ($plugin in $installable) {
 # Installed plugins, the ones just installed included: the marketplace may have moved on
 # between the scan and the install
 if ($installable.Count -and -not $DryRun) { $userPlugins = Get-UserPlugins }
-$open = [ordered]@{ unvetted = @(); changed = @(); unapproved = @(); incomplete = @() }
+$open = [ordered]@{ unvetted = @(); changed = @(); unapproved = @(); incomplete = @(); unreadable = @() }
 foreach ($plugin in @($enabled | Where-Object { $userPlugins.Contains($_) })) {
     $folder = $userPlugins[$plugin].Folder
     if (-not (Test-Path -LiteralPath $folder)) { Write-Warning "The files of $plugin are missing ($folder); reinstall it."; continue }
-    $verdict = Get-PluginVerdict $vetting[$plugin] (Get-PluginHash $folder)
+    $verdict = Get-FolderVerdict $plugin $folder
     if ($verdict -ne 'ok') { $open[$verdict] += $plugin }
 }
 foreach ($verdict in @($open.Keys)) {
     if ($open[$verdict].Count) {
-        Write-Warning "Enabled plugins, $($verdictText[$verdict]): $($open[$verdict] -join ', '). Run scripts\vet-plugins.ps1 (README, ""Vetting plugins"")."
+        Write-Warning ("Enabled plugins, $($verdictText[$verdict]): $($open[$verdict] -join ', '). They load in the next " +
+                       'session: scan them with scripts\vet-plugins.ps1 before you start one (README, "Vetting plugins").')
     }
 }
 

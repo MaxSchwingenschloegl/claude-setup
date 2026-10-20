@@ -172,7 +172,7 @@ Two well-known official plugins are not in the template, because skillspector sc
 what they do goes beyond reading text. Enable them yourself if you want what they bring:
 
 - **superpowers**: process skills for brainstorming, plans, test-driven development and
-  debugging. Its session-start hook adds about 3.5 KB of instructions to every session that make
+  debugging. Its session-start hook adds about 3.2 KB of instructions to every session that make
   Claude check for a matching skill before any answer. Very effective, and very insistent.
 - **security-guidance**: a background security review of your edits, commits and pushes, sent to
   a model as a diff. At session start it installs the `claude-agent-sdk` package from PyPI,
@@ -194,7 +194,13 @@ records the results in your configuration's `vetting.json`. Commit that file wit
 
 - Each entry holds the version, a fingerprint of the plugin's files, the date, the score, the
   recommendation and the findings by severity. A plugin that is not installed yet is scanned in
-  the local copy of its marketplace, before it ever runs.
+  the local copy of its marketplace, before it ever runs, when the marketplace holds it as a
+  folder (most official plugins); one from a remote repository is scanned after
+  `claude plugin install`, which runs nothing yet, and before the next session.
+- **Scan before the first session on a new machine:** `install.ps1`, then `vet-plugins.ps1`, then
+  Claude Code. Claude Code can install what `settings.json` enables on its own when a session
+  starts (seen in the home folder, see *Things to know*), without asking this tool; switch off
+  in `settings.json` what you do not want before you start it.
 - A score above 50, or a scan that did not cover every file, needs an exception: read every
   finding in the report the script names, and if each one is harmless, add `"approved"` (the
   date) and `"reasons"` to the plugin's entry. An approval holds only for the files it was given
@@ -205,6 +211,10 @@ records the results in your configuration's `vetting.json`. Commit that file wit
 - `install.ps1` warns about every enabled plugin without a scan, changed since its scan, or above
   50 or incomplete without an approval. `-InstallPlugins` installs only plugins whose scan
   matches what the marketplace would install.
+- Some plugins, the language servers among them, declare their servers, hooks or commands in the
+  marketplace entry instead of their folder (`"strict": false`). Those fields count toward the
+  fingerprint, so a change is noticed, but skillspector scans only the folder: read the entry in
+  the marketplace's `.claude-plugin/marketplace.json` yourself.
 - Most official plugins have no version of their own and take the marketplace's commit as one,
   which changes with every marketplace update. The fingerprint does not, so an update that left a
   plugin alone needs no new scan.

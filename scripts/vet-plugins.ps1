@@ -46,13 +46,23 @@ $fields = 'version', 'commit', 'hash', 'scanned', 'skillspector', 'provider', 's
           'issues', 'analysis', 'semantic', 'approved', 'reasons'
 
 # Writes vetting.json by hand: ConvertTo-Json in Windows PowerShell indents unevenly and escapes
-# quotes and angle brackets, which makes the reasons hard to read and to review in a diff
+# quotes and angle brackets, which makes the reasons hard to read and to review in a diff. Lists
+# and objects you add to an entry yourself are kept, written on one line.
 function ConvertTo-JsonText($Value) {
     if ($null -eq $Value) { return 'null' }
     if ($Value -is [bool]) { return $Value.ToString().ToLowerInvariant() }
-    if ($Value -is [int] -or $Value -is [long] -or $Value -is [double]) { return ([double]$Value).ToString([Globalization.CultureInfo]::InvariantCulture) }
+    # Windows PowerShell reads 13.5 as decimal, PowerShell 7 as double
+    if ($Value -is [int] -or $Value -is [long] -or $Value -is [double] -or $Value -is [decimal] -or $Value -is [single]) {
+        return ([IFormattable]$Value).ToString($null, [Globalization.CultureInfo]::InvariantCulture)
+    }
     # PowerShell 7 reads "2026-10-20" as a date
     if ($Value -is [datetime]) { $Value = $Value.ToString('yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture) }
+    if ($Value -is [Management.Automation.PSCustomObject]) {
+        return '{ ' + (@(foreach ($p in $Value.PSObject.Properties) { "$(ConvertTo-JsonText $p.Name): $(ConvertTo-JsonText $p.Value)" }) -join ', ') + ' }'
+    }
+    if ($Value -isnot [string] -and $Value -is [Collections.IEnumerable]) {
+        return '[' + (@(foreach ($item in $Value) { ConvertTo-JsonText $item }) -join ', ') + ']'
+    }
     $text = ([string]$Value).Replace('\', '\\').Replace('"', '\"')
     $text = [regex]::Replace($text, '[\x00-\x1f]', { param($m) '\u{0:x4}' -f [int][char]$m.Value })
     return '"' + $text + '"'
@@ -120,14 +130,15 @@ foreach ($name in $names) {
     } else {
         $source = Get-PluginSource $name
         if (-not $source -or -not $source.Folder) {
-            $why = if ($source) { 'it comes from a remote repository; install it without starting a session, then run this again' }
-                   else { 'its marketplace is not on this machine; start Claude Code once, then run this again' }
-            Write-Warning "${name}: not installed and not scanned, $why."
+            # Starting a session to fetch a marketplace would load the very plugins not scanned yet
+            $why = if ($source) { 'it comes from a remote repository. Install it with claude plugin install, then run this again before you start a session' }
+                   else { 'its marketplace is not on this machine. Add it with claude plugin marketplace add <owner/repo> (settings.json, extraKnownMarketplaces, names it), then run this again' }
+            Write-Warning "${name}: not installed and not scanned; $why."
             continue
         }
         $folder = $source.Folder; $version = 'not installed'; $commit = $null
     }
-    try { $hash = Get-PluginHash $folder }
+    try { $hash = Get-PluginHash $folder $name }
     catch { Write-Warning "Could not read the files of ${name}: $($_.Exception.Message)"; continue }
 
     if ($old -and $old.hash -eq $hash -and -not $Force) {
