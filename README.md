@@ -271,6 +271,25 @@ Your own groups or other private marketplaces go into `accounts.json`:
 `.claude-plugin/marketplace.json`). Global skills for every session go into the configuration's
 `skills/` folder, one folder per skill.
 
+## Language servers
+
+A language-server plugin (`pyright-lsp`, `typescript-lsp`, `csharp-lsp`, `rust-lsp`, …) gives
+Claude go-to-definition, references and the compiler's diagnostics after each edit. It only
+declares a program, which each machine installs itself; when that program is missing, Claude
+Code says nothing (not even in `--debug`) and the plugin does nothing. `install.ps1` therefore
+lists every server program it cannot find on PATH, for the plugins your `settings.json` enables
+and for every installed one, those a project installed for itself included. It installs none:
+
+```powershell
+npm i -g pyright typescript-language-server typescript   # pyright-lsp, typescript-lsp
+rustup component add rust-analyzer                        # rust-lsp
+dotnet tool install -g csharp-ls                          # csharp-lsp (current versions need the .NET 10 SDK)
+```
+
+With a Node version manager such as fnm the npm programs belong to its default Node version;
+install them again after switching it. The check uses the PATH of the shell that runs
+`install.ps1`, so run it from the same kind of shell you start Claude Code from.
+
 ## Secret guard, status line, privacy
 
 - `hooks/block-secrets.sh` is a PreToolUse hook that blocks Read, Grep, Bash and PowerShell calls

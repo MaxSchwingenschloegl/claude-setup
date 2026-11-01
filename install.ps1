@@ -596,6 +596,37 @@ foreach ($verdict in @($open.Keys)) {
     }
 }
 
+# 8. Language servers: a plugin that declares one starts a program this machine has to provide,
+#    and does nothing, without a word from Claude Code, when it is missing. Checked for the
+#    enabled plugins and for every installed one, those a project installed for itself included.
+#    Nothing is installed: npm, rustup and dotnet are your decision.
+#    A plugin enabled but not installed is read from the local copy of its marketplace.
+$lspPlugins = @{}
+$anyScope = Get-UserPlugins -AnyScope
+foreach ($plugin in @($enabled) + @($anyScope.Keys)) {
+    $folder = if ($anyScope.Contains($plugin)) { $anyScope[$plugin].Folder } else { (Get-PluginSource $plugin).Folder }
+    if ($folder -and -not (Test-Path -LiteralPath $folder)) { $folder = $null }
+    $lspPlugins[$plugin] = $folder
+}
+$missingServers = @(); $uncheckedServers = @()
+foreach ($plugin in $lspPlugins.Keys | Sort-Object) {
+    $short = $plugin -replace '@.*'
+    if (-not $lspPlugins[$plugin] -and -not (Get-MarketplaceEntry $plugin)) { $uncheckedServers += $short; continue }
+    foreach ($command in Get-LspCommands $plugin $lspPlugins[$plugin]) {
+        if ($command -like '*${*') { $uncheckedServers += "$short ($command)"; continue }
+        $present = if ([IO.Path]::IsPathRooted($command)) { Test-Path -LiteralPath $command -PathType Leaf }
+                   else { [bool](Get-Command $command -CommandType Application -ErrorAction SilentlyContinue) }
+        if (-not $present) { $missingServers += "$command ($short)" }
+    }
+}
+if ($missingServers.Count) {
+    Write-Warning ("Language servers not found on PATH: $($missingServers -join ', '). Those plugins do nothing " +
+                   'until you install them (README, "Language servers").')
+}
+if ($uncheckedServers.Count) {
+    Write-Warning "Language servers not checked, neither the files nor the marketplace entry are on this machine: $($uncheckedServers -join ', ')."
+}
+
 if (-not $changes) {
     Write-Host 'Everything is set up.' -ForegroundColor Green
 } elseif (-not $DryRun) {

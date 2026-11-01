@@ -12,23 +12,28 @@ function Read-JsonFile([string]$Path) {
     catch { Write-Warning "Could not read ${Path}: $($_.Exception.Message)"; return $null }
 }
 
-# The plugins installed for all projects, as name -> folder. Claude Code records the path
-# through whichever account installed it; skillspector refuses a path below a link, so the
-# folder is given through the hub.
-function Get-UserPlugins {
+# The plugins installed for all projects, as name -> folder; with -AnyScope also those a
+# project installed for itself, the user record first and otherwise the first record whose
+# folder still exists. Claude Code records the path through whichever account installed it;
+# skillspector refuses a path below a link, so the folder is given through the hub.
+function Get-UserPlugins([switch]$AnyScope) {
     $result = @{}
     $installed = (Read-JsonFile "$($ClaudeLayout.Hub)\plugins\installed_plugins.json").plugins
     if (-not $installed) { return $result }
     foreach ($property in $installed.PSObject.Properties) {
-        $record = @($property.Value | Where-Object scope -eq 'user')[0]
-        if (-not $record) { continue }
-        $path = $record.installPath
-        if (-not $path) { continue }
-        $at = $path.IndexOf('\plugins\cache\', [StringComparison]::OrdinalIgnoreCase)
-        if ($at -ge 0) { $path = $ClaudeLayout.Hub + $path.Substring($at) }
-        $result[$property.Name] = [pscustomobject]@{
-            Folder = $path; Version = $record.version; Commit = $record.gitCommitSha
+        $records = @($property.Value | Where-Object { $_.scope -eq 'user' })
+        if ($AnyScope) { $records += @($property.Value | Where-Object { $_.scope -ne 'user' }) }
+        $found = $null
+        foreach ($record in $records) {
+            $path = $record.installPath
+            if (-not $path) { continue }
+            $at = $path.IndexOf('\plugins\cache\', [StringComparison]::OrdinalIgnoreCase)
+            if ($at -ge 0) { $path = $ClaudeLayout.Hub + $path.Substring($at) }
+            $candidate = [pscustomobject]@{ Folder = $path; Version = $record.version; Commit = $record.gitCommitSha }
+            if (-not $found) { $found = $candidate }
+            if (-not $AnyScope -or (Test-Path -LiteralPath $path)) { $found = $candidate; break }
         }
+        if ($found) { $result[$property.Name] = $found }
     }
     return $result
 }
@@ -77,6 +82,44 @@ function Get-PluginSource([string]$Name) {
 # Entry fields that load or run something. With "strict": false a plugin's hooks, servers and
 # commands live there instead of in its folder, so they belong to its fingerprint.
 $MarketplaceComponentFields = 'commands', 'agents', 'skills', 'hooks', 'mcpServers', 'lspServers', 'outputStyles'
+
+# The programs a plugin's language servers start: declared in its marketplace entry
+# ("strict": false) or, when its folder is given, in its plugin.json or .lsp.json. lspServers
+# may be an object of servers, a path to a file holding one, or an array of both.
+# ${CLAUDE_PLUGIN_ROOT} is replaced by the folder. A declaration it cannot read is reported
+# instead of read as "no servers": Claude Code says nothing when a server's program is missing,
+# so the plugin then does nothing without a word.
+function Get-LspCommands([string]$Name, [string]$Folder) {
+    $servers = [Collections.ArrayList]::new()
+    $collect = {
+        param($Value, [string]$Origin)
+        if ($null -eq $Value) { return }
+        if ($Value -is [string]) {
+            if (-not $Folder) { Write-Warning "${Name}: lspServers in $Origin points to $Value, but the plugin's folder is unknown here."; return }
+            $path = Join-Path $Folder $Value
+            if (-not (Test-Path -LiteralPath $path)) { Write-Warning "${Name}: lspServers in $Origin points to $Value, which does not exist."; return }
+            & $collect (Read-CaseSensitiveJson $path) $Value
+        } elseif ($Value -is [Collections.IDictionary]) {
+            foreach ($server in $Value.Values) { [void]$servers.Add($server) }
+        } elseif ($Value -is [Collections.IEnumerable]) {
+            foreach ($item in $Value) { & $collect $item $Origin }
+        } else { Write-Warning "${Name}: lspServers in $Origin has a shape this check does not know." }
+    }
+    $found = Get-MarketplaceEntry $Name
+    if ($found) { & $collect $found.Entry['lspServers'] 'its marketplace entry' }
+    if ($Folder) {
+        & $collect (Read-CaseSensitiveJson "$Folder\.claude-plugin\plugin.json")['lspServers'] 'plugin.json'
+        $file = Read-CaseSensitiveJson "$Folder\.lsp.json"
+        if ($file.Count) { & $collect $file '.lsp.json' }
+    }
+    @(foreach ($server in $servers) {
+        if ($server -is [Collections.IDictionary] -and $server['command']) {
+            $command = [string]$server['command']
+            if ($Folder) { $command = $command.Replace('${CLAUDE_PLUGIN_ROOT}', $Folder) }
+            $command
+        }
+    }) | Sort-Object -Unique
+}
 
 # JSON with sorted keys, so the same entry always gives the same text
 function ConvertTo-CanonicalJson($Value) {
