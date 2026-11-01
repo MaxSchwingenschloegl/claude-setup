@@ -281,8 +281,10 @@ Your own groups or other private marketplaces go into `accounts.json`:
   move the repo only together with a new install run. Tests: `bash hooks/block-secrets.test.sh`.
 - `statusline/statusline.sh` shows the account, the model, the context fill and the five-hour and
   weekly limits, so you always see which account a session runs on. Claude Code can keep
-  reporting a five-hour window for a plan that has none; list those accounts in
-  `STATUSLINE_NO_FIVE_HOUR` (space-separated, in your configuration's `settings.json` under `env`).
+  reporting a five-hour window for a plan that has none; list those plans' rate-limit tiers (as
+  in each account's `.claude.json`, `oauthAccount`, e.g. `default_claude_max_20x`) in
+  `STATUSLINE_NO_FIVE_HOUR`, space-separated, in your configuration's `settings.json` under
+  `env`. The tier is an internal field Claude Code may rename; then the 5h part simply returns.
 - What still goes to Anthropic is the conversation itself, the host name before a WebFetch and,
   while Remote Control is connected, the synced session. How long it is kept depends on your
   plan and on "Help improve Claude" at claude.ai/settings/data-privacy-controls (consumer plans:
