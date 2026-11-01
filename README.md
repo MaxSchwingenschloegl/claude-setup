@@ -291,15 +291,18 @@ With a Node version manager such as fnm the npm programs belong to its default N
 install them again after switching it. The check uses the PATH of the shell that runs
 `install.ps1`, so run it from the same kind of shell you start Claude Code from.
 
-`csharp-lsp` starts `csharp-ls` without a solution, and csharp-ls then loads one of all it finds
-below the project, the ones in `.claude/worktrees/` included: a file of the main checkout then
-belongs to no loaded project and gets no diagnostics, without an error. In such a repository use
+`csharp-lsp` starts `csharp-ls` without a solution, and csharp-ls then loads the solution with
+the most projects below the project, the ones in `.claude/worktrees/` included; a worktree on a
+newer branch often has more. A file of the main checkout then belongs to no loaded project and
+gets no diagnostics, without an error. In such a repository use
 `csharp-solution-lsp` instead and name the solution in `.claude/csharp-ls-solution` (one line, a
-path relative to the project root, without a byte-order mark: PowerShell 5.1's `Out-File` writes
-one, `Set-Content` does not) when the root holds more than one. A name it cannot find is reported
+path relative to the project root on the first non-empty line, without a byte-order mark:
+PowerShell 5.1's `Out-File` writes one, `Set-Content` does not) when the root holds more than one. A name it cannot find is reported
 and the root searched instead; a project folder it cannot enter stops it. A session in a worktree
-has the worktree as its project and gets its own solution. `install.ps1` checks the plugin's
-start script, not the `csharp-ls` it calls.
+has the worktree as its project and gets its own solution; run `dotnet restore` there first, or
+csharp-ls reports missing types (CS0246, CS0518) that are not there. csharp-ls answers diagnostics
+when they are requested rather than pushing them. `install.ps1` checks the plugin's start
+script, not the `csharp-ls` it calls.
 
 ## Secret guard, status line, privacy
 

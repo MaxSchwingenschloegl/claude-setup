@@ -119,16 +119,18 @@ three semantic analyzers completed.
 
 Written here, not vendored: a plugin.json that declares csharp-ls for `.cs` files, started
 through `bin/start.cmd` with the project folder. The script enters that folder (and stops if it
-cannot), reads the solution from the first line of `.claude/csharp-ls-solution` (trailing spaces
+cannot), reads the solution from the first non-empty line of `.claude/csharp-ls-solution`
+(CRLF or LF; trailing spaces
 trimmed; a name that does not exist is reported and ignored), else takes the only `.sln` or
 `.slnx` in the root, and runs `csharp-ls --solution` with it; with no single solution it runs
 `csharp-ls` alone and says why on stderr. It runs nothing else and changes no file. No path is
 expanded inside a `( )` block, so a `)` in it cannot break the script. A double quote in the
 first line of the file stops the script with exit 255; no solution name holds one.
 
-Measured on 2026-11-01 with a fake csharp-ls that prints its arguments, over 19 project roots:
+Measured on 2026-11-01 with a fake csharp-ls that prints its arguments, over 22 project roots:
 paths with `( )`, `&`, `%`, `!` and spaces; an entry naming a subfolder, with a byte-order mark,
-in UTF-16, with trailing spaces, an empty first line; `.sln` beside `.slnx` and `.sln.bak`; a
+in UTF-16, with trailing spaces, an empty first line, several lines with LF or CRLF, no final
+newline; `.sln` beside `.slnx` and `.sln.bak`; a
 solutions named `My (a) & b.sln`, `a^b.sln` and `a%PATH%b.sln`; a folder that does not exist and an unexpanded
 `${CLAUDE_PROJECT_DIR}`. Each gave the expected solution, warning or stop, and csharp-ls's exit
 code came back. With the real csharp-ls 0.28.0 a type error sent in memory came back as CS0029

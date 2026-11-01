@@ -1,6 +1,6 @@
 @echo off
 rem Starts csharp-ls with one solution of the project root (%1, else the current folder), so
-rem it never loads one from a worktree or a subfolder: the solution named on the first line of
+rem it never loads one from a worktree or a subfolder: the solution named on the first non-empty line of
 rem .claude\csharp-ls-solution (a path relative to the root), else the only .sln or .slnx in the
 rem root. A named solution that does not exist (a typo, a trailing space, a byte-order mark) is
 rem reported and the root is searched instead; with no single solution csharp-ls starts without
@@ -13,7 +13,9 @@ set "ROOT=%~1"
 if not defined ROOT set "ROOT=%CD%"
 cd /d "%ROOT%" || goto noroot
 set "SLN="
-if exist ".claude\csharp-ls-solution" set /p SLN=<".claude\csharp-ls-solution"
+rem The first non-empty line; for /f ends a line at CRLF or LF alike (set /p would keep an LF)
+if not exist ".claude\csharp-ls-solution" goto trim
+for /f "usebackq delims= eol=|" %%L in (".claude\csharp-ls-solution") do (set "SLN=%%L" & goto trim)
 rem Trailing spaces pass the exist check (Windows ignores them) but not csharp-ls
 :trim
 if not defined SLN goto detect
