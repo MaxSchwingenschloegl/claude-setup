@@ -27,8 +27,9 @@ context=$(percent_after context_window)
 five_hour=$(percent_after five_hour)
 # The plan's rate-limit tier, the user's own before the organisation's; an unknown tier keeps 5h
 if [[ -n $STATUSLINE_NO_FIVE_HOUR && -n $five_hour ]]; then
-    file="${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"
+    config= tier= file="${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json"
     [[ -r $file ]] && config=$(<"$file")
+    [[ $config == *'"oauthAccount"'* ]] && config=${config#*\"oauthAccount\"} || config=
     for key in userRateLimitTier organizationRateLimitTier; do
         re="\"$key\"[[:space:]]*:[[:space:]]*\"([^\"]+)\""
         [[ $config =~ $re ]] && tier=${BASH_REMATCH[1]} && break
