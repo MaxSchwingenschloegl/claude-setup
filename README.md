@@ -300,9 +300,9 @@ path relative to the project root on the first non-empty line, without a byte-or
 PowerShell 5.1's `Out-File` writes one, `Set-Content` does not) when the root holds more than one. A name it cannot find is reported
 and the root searched instead; a project folder it cannot enter stops it. A session in a worktree
 has the worktree as its project and gets its own solution; run `dotnet restore` there first, or
-csharp-ls reports missing types (CS0246, CS0518) that are not there. csharp-ls answers diagnostics
-when they are requested rather than pushing them. `install.ps1` checks the plugin's start
-script, not the `csharp-ls` it calls.
+csharp-ls reports missing types (CS0246, CS0518) that are not there. It may also show hints the
+build does not, such as CS9335 ("the pattern is redundant"), probably because it brings its own,
+newer Roslyn. `install.ps1` checks the plugin's start script, not the `csharp-ls` it calls.
 
 ## Secret guard, status line, privacy
 
