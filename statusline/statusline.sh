@@ -3,7 +3,9 @@
 # of the five-hour and the weekly limit is used, e.g.
 # "work · Opus 5.5 · context 23% · 5h 41% · week 63%".
 # Plain bash like the secret guard, so it needs nothing else. Parts that Claude Code has not
-# reported yet (early in a session, or a plan without rate limits) are left out.
+# reported yet (early in a session, or a plan without rate limits) are left out. Claude Code may
+# still report a five-hour window for a plan that no longer has one; list such accounts, by the
+# name the line shows, in STATUSLINE_NO_FIVE_HOUR (space-separated, e.g. in settings.json `env`).
 
 input=$(cat)
 
@@ -22,6 +24,7 @@ percent_after() {
 }
 context=$(percent_after context_window)
 five_hour=$(percent_after five_hour)
+[[ " $STATUSLINE_NO_FIVE_HOUR " == *" $account "* ]] && five_hour=
 seven_day=$(percent_after seven_day)
 
 line=$account
