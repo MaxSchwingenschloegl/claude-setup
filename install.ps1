@@ -611,9 +611,16 @@ foreach ($plugin in @($enabled) + @($anyScope.Keys)) {
 $missingServers = @(); $uncheckedServers = @()
 foreach ($plugin in $lspPlugins.Keys | Sort-Object) {
     $short = $plugin -replace '@.*'
-    if (-not $lspPlugins[$plugin] -and -not (Get-MarketplaceEntry $plugin)) { $uncheckedServers += $short; continue }
+    # Without its files only an entry that declares servers itself can be checked: a plugin
+    # may declare them in its own plugin.json
+    $entry = (Get-MarketplaceEntry $plugin).Entry
+    if (-not $lspPlugins[$plugin] -and -not ($entry -and $entry['lspServers'])) { $uncheckedServers += $short; continue }
     foreach ($command in Get-LspCommands $plugin $lspPlugins[$plugin]) {
         if ($command -like '*${*') { $uncheckedServers += "$short ($command)"; continue }
+        if (-not [IO.Path]::IsPathRooted($command) -and $command -match '[\\/]') {
+            if (-not $lspPlugins[$plugin]) { $uncheckedServers += "$short ($command)"; continue }
+            $command = Join-Path $lspPlugins[$plugin] $command
+        }
         $present = if ([IO.Path]::IsPathRooted($command)) { Test-Path -LiteralPath $command -PathType Leaf }
                    else { [bool](Get-Command $command -CommandType Application -ErrorAction SilentlyContinue) }
         if (-not $present) { $missingServers += "$command ($short)" }
