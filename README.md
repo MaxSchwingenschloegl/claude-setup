@@ -253,6 +253,7 @@ context in every session of every project. This repo is a plugin marketplace nam
 | `dev`    | codebase architecture: deepening opportunities, module design, domain model and ADRs |
 | `web`    | websites: SEO, AI search, structured data, analytics, copy, conversion |
 | `growth` | marketing for clients: campaigns, ads, email, sales, pricing, social |
+| `rust-lsp` | Rust code intelligence: rust-analyzer checking into `target/rust-analyzer`, so it never waits on or blocks your builds (needs `rustup component add rust-analyzer`) |
 
 ```powershell
 claude plugin install web@claude-setup --scope local     # this project, only for you
@@ -260,7 +261,8 @@ claude plugin install web@claude-setup --scope project   # this project, for eve
 ```
 
 Plugin skills are namespaced (`/web:copywriting`), so they never shadow a project skill of the
-same name. They are vendored third-party skills (MIT); `plugins/VENDORED.md` lists sources,
+same name. Apart from `rust-lsp`, which only declares a language server, they are vendored
+third-party skills (MIT); `plugins/VENDORED.md` lists sources,
 commits and skillspector scores, including seven skills above 50 that the repository owner
 accepted as false positives: decide for yourself before you enable `growth`.
 

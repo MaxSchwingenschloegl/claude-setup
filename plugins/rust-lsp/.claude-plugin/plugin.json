@@ -1,0 +1,21 @@
+{
+  "name": "rust-lsp",
+  "version": "1.0.0",
+  "description": "rust-analyzer for Rust projects, checking into target/rust-analyzer so its background cargo check never waits on, or blocks, your own builds for the target directory lock. Needs rust-analyzer on PATH (rustup component add rust-analyzer).",
+  "author": {
+    "name": "MaxSchwingenschloegl"
+  },
+  "lspServers": {
+    "rust-analyzer": {
+      "command": "rust-analyzer",
+      "extensionToLanguage": {
+        ".rs": "rust"
+      },
+      "initializationOptions": {
+        "cargo": {
+          "targetDir": true
+        }
+      }
+    }
+  }
+}

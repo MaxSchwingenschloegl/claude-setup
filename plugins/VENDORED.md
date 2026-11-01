@@ -106,6 +106,15 @@ Not taken: `grill-with-docs` (its ADR and glossary files clash with each repo's 
 `tdd` (superpowers has it), and `find-skills` from vercel-labs/skills (it installs skills without
 the skillspector scan).
 
+## rust-lsp
+
+Written here, not vendored: a plugin.json that declares rust-analyzer as a language server for
+`.rs` files with the initialization option `cargo.targetDir: true`, so its `cargo check` builds
+into `target/rust-analyzer` instead of `target/`. The official `rust-analyzer-lsp` has no such
+option and shares the target directory with every build. It runs the `rust-analyzer` on PATH and
+nothing else. skillspector 2.12.0 (`claude_cli`) on 2026-11-01: score 0, SAFE, no findings, all
+three semantic analyzers completed.
+
 ## Marketplace plugins in the `recommended` template
 
 `templates/recommended/settings.json` enables four official plugins from `claude-plugins-official`.

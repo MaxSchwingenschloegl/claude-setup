@@ -21,6 +21,11 @@
       "name": "growth",
       "source": "./plugins/growth",
       "description": "Marketing for clients: campaigns, ads, email, sales, pricing, launches, retention and social"
+    },
+    {
+      "name": "rust-lsp",
+      "source": "./plugins/rust-lsp",
+      "description": "rust-analyzer with its own target directory, so it never competes with your builds"
     }
   ]
 }
