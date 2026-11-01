@@ -158,7 +158,7 @@ Run the dry run first and read it. The installer takes over what you had:
 | `CLAUDE.md`: evidence before success claims, numbers from executed code, language, skill vetting | yes | a header only |
 | `rules/git.md`: branch first, approval before outward actions, stage by path, no `--no-verify`, no Claude attribution | yes | – |
 | No Claude attribution in commits and pull requests (`attribution`) | yes | – |
-| Plugins: feature-dev, code-review, claude-md-management, frontend-design (skillspector 2 to 13, `plugins/VENDORED.md`) | yes | – |
+| Plugins: feature-dev, code-review, claude-md-management, frontend-design (skillspector 0 to 13, `plugins/VENDORED.md`) | yes | – |
 | Global skills `grilling` and `grill-me` (an interview that stress-tests a plan) | yes | – |
 | Spinner tips off, unused claude.ai skills off | yes | – |
 | Bash timeouts raised to 5 minutes (default) and 20 minutes (maximum) | yes | yes |
@@ -203,7 +203,7 @@ records the results in your configuration's `vetting.json`. Commit that file wit
   starts (seen in the home folder, see *Things to know*), without asking this tool; switch off
   in `settings.json` what you do not want before you start it. This is a limit of the check, not
   something it can close: `install.ps1` gates only its own `-InstallPlugins`. The `recommended`
-  template still enables its four plugins, as they are official ones scoring 2 to 13
+  template still enables its four plugins, as they are official ones scoring 0 to 13
   (`plugins/VENDORED.md`); with plugins of your own, scan before you enable them.
 - A score above 50, or a scan that did not cover every file, needs an exception: read every
   finding in the report the script names, and if each one is harmless, add `"approved"` (the
