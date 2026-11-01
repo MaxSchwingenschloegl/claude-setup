@@ -14,6 +14,11 @@ require AI attribution: then follow them and tell me that you did.
 - Never commit to `main`; create a branch first.
 - Commit, push, open a pull request or issue, merge, and delete a branch only after I said yes in
   this session, with the summary or diff shown first. Never merge unprompted.
+- A repository that names no flow of its own: work on a branch and, after my yes, merge it into
+  `main` by fast-forward (`git push origin <branch>:main`), then delete the branch. A pull request
+  only when the repository uses them (a PR template, PR-checking hooks, earlier merged PRs).
+- In a repository I do not own, never push to `main`: push a branch and open a pull request, both
+  only after my yes, unless that repository's own rules say otherwise.
 
 ## Safe changes
 - Stage by path, never `git add -A` or `git add .`, and run `git diff <path>` before staging it:
