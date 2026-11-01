@@ -50,6 +50,17 @@
             "timeout": 30
           }
         ]
+      },
+      {
+        "matcher": "Bash|PowerShell|Grep|Glob",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/block-profile-wide-search.sh",
+            "shell": "bash",
+            "timeout": 30
+          }
+        ]
       }
     ]
   },

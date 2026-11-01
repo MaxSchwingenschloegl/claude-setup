@@ -6,8 +6,8 @@ set up with two clones and one script.
 
 **What lives here:** the tools: the installer (`install.ps1`), the PowerShell functions that
 switch accounts (`shell/`, `scripts/`), a plugin scan (`scripts/vet-plugins.ps1`), a secret
-guard (`hooks/`), a status line (`statusline/`), skill groups as plugins you enable per project
-(`plugins/`) and two templates for your own configuration (`templates/`).
+guard and a search guard (`hooks/`), a status line (`statusline/`), skill groups as plugins you
+enable per project (`plugins/`) and two templates for your own configuration (`templates/`).
 **What never lives here:** your configuration. Accounts, settings, rules and global skills live
 in a folder of your own, ideally a private git repository, which `install.ps1` links into every
 account. Logins, tokens, transcripts and memory stay on each machine.
@@ -311,6 +311,17 @@ start script, not the `csharp-ls` it calls.
   header lists what it does not cover. If its script cannot be found (this repo moved without
   running `install.ps1` again), Claude Code shows a hook error and the call goes through, so
   move the repo only together with a new install run. Tests: `bash hooks/block-secrets.test.sh`.
+- `hooks/block-profile-wide-search.sh` is a PreToolUse hook that blocks a recursive search (`find`,
+  `grep -r`, `rg`, `ls -R`, `du`, `tree`, `Get-ChildItem -Recurse`, the Grep and Glob tools) over
+  the user profile, anything above it, or a cloud-synced folder, starting in one or above one. A
+  sync client keeps most files online-only and downloads each one a search opens, so one `find ~`
+  can fill the disk, and a timed-out call leaves `find.exe` running after Git Bash has ended. The
+  synced folders need no configuration: on Windows the hook reads the folders every client has
+  registered with the Cloud Files API (OneDrive, SharePoint libraries, Dropbox, Google Drive,
+  iCloud), on macOS it guards `~/Library/CloudStorage`. For a client that registers nothing, list
+  a part of the folder's name in `PROFILE_SEARCH_GUARD_EXTRA` (`;`-separated) in your own
+  `settings.json` `env`. It reads the command text and the registry and opens no file in the
+  profile. Tests: `bash hooks/block-profile-wide-search.test.sh`.
 - `statusline/statusline.sh` shows the account, the model, the context fill and the five-hour and
   weekly limits, so you always see which account a session runs on. Claude Code can keep
   reporting a five-hour window for a plan that has none; list those plans' rate-limit tiers (as
