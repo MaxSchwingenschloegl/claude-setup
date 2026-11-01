@@ -26,6 +26,11 @@
       "name": "rust-lsp",
       "source": "./plugins/rust-lsp",
       "description": "rust-analyzer with its own target directory, so it never competes with your builds"
+    },
+    {
+      "name": "csharp-solution-lsp",
+      "source": "./plugins/csharp-solution-lsp",
+      "description": "csharp-ls bound to one solution of the project root, for repositories with worktrees or several solutions"
     }
   ]
 }

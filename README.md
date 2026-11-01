@@ -254,6 +254,7 @@ context in every session of every project. This repo is a plugin marketplace nam
 | `web`    | websites: SEO, AI search, structured data, analytics, copy, conversion |
 | `growth` | marketing for clients: campaigns, ads, email, sales, pricing, social |
 | `rust-lsp` | Rust code intelligence: rust-analyzer checking into `target/rust-analyzer`, so it never waits on or blocks your builds (needs `rustup component add rust-analyzer`) |
+| `csharp-solution-lsp` | C# code intelligence for a repository with worktrees or several solutions: csharp-ls loads the solution named in `.claude/csharp-ls-solution`, else the only `.sln`/`.slnx` in the project root, instead of one picked at random (needs `csharp-ls`); switch the global `csharp-lsp` off in that project |
 
 ```powershell
 claude plugin install web@claude-setup --scope local     # this project, only for you
@@ -261,7 +262,7 @@ claude plugin install web@claude-setup --scope project   # this project, for eve
 ```
 
 Plugin skills are namespaced (`/web:copywriting`), so they never shadow a project skill of the
-same name. Apart from `rust-lsp`, which only declares a language server, they are vendored
+same name. Apart from `rust-lsp` and `csharp-solution-lsp`, which only declare a language server, they are vendored
 third-party skills (MIT); `plugins/VENDORED.md` lists sources,
 commits and skillspector scores, including seven skills above 50 that the repository owner
 accepted as false positives: decide for yourself before you enable `growth`.
@@ -289,6 +290,16 @@ dotnet tool install -g csharp-ls                          # csharp-lsp (current 
 With a Node version manager such as fnm the npm programs belong to its default Node version;
 install them again after switching it. The check uses the PATH of the shell that runs
 `install.ps1`, so run it from the same kind of shell you start Claude Code from.
+
+`csharp-lsp` starts `csharp-ls` without a solution, and csharp-ls then loads one of all it finds
+below the project, the ones in `.claude/worktrees/` included: a file of the main checkout then
+belongs to no loaded project and gets no diagnostics, without an error. In such a repository use
+`csharp-solution-lsp` instead and name the solution in `.claude/csharp-ls-solution` (one line, a
+path relative to the project root, without a byte-order mark: PowerShell 5.1's `Out-File` writes
+one, `Set-Content` does not) when the root holds more than one. A name it cannot find is reported
+and the root searched instead; a project folder it cannot enter stops it. A session in a worktree
+has the worktree as its project and gets its own solution. `install.ps1` checks the plugin's
+start script, not the `csharp-ls` it calls.
 
 ## Secret guard, status line, privacy
 

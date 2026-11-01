@@ -1,0 +1,17 @@
+{
+  "name": "csharp-solution-lsp",
+  "version": "1.0.0",
+  "description": "csharp-ls bound to one solution of the project root, so a repository with worktrees or several solutions never gets one picked at random. Uses the solution named in .claude/csharp-ls-solution, else the only .sln or .slnx in the project root. Needs csharp-ls on PATH (dotnet tool install -g csharp-ls).",
+  "author": {
+    "name": "MaxSchwingenschloegl"
+  },
+  "lspServers": {
+    "csharp-ls": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/start.cmd",
+      "args": ["${CLAUDE_PROJECT_DIR}"],
+      "extensionToLanguage": {
+        ".cs": "csharp"
+      }
+    }
+  }
+}
