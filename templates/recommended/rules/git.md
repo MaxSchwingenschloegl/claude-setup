@@ -11,14 +11,23 @@ The only exception is a repository whose own rules (CONTRIBUTING, a PR template,
 require AI attribution: then follow them and tell me that you did.
 
 ## Branches and approval
-- Never commit to `main`; create a branch first.
+- Never commit on `main`; create a branch first. `main` moves only through a pull request or the
+  fast-forward below.
 - Commit, push, open a pull request or issue, merge, and delete a branch only after I said yes in
-  this session, with the summary or diff shown first. Never merge unprompted.
-- A repository that names no flow of its own: work on a branch and, after my yes, merge it into
-  `main` by fast-forward (`git push origin <branch>:main`), then delete the branch. A pull request
-  only when the repository uses them (a PR template, PR-checking hooks, earlier merged PRs).
-- In a repository I do not own, never push to `main`: push a branch and open a pull request, both
-  only after my yes, unless that repository's own rules say otherwise.
+  this session, with the summary or diff shown first. Never merge unprompted. A yes to merge also
+  covers deleting the merged branch, locally and on the remote.
+- My own repositories are those whose `origin` is under my GitHub account (name it here, e.g.
+  `github.com/<your-account>`). In anyone else's push a branch and open a pull request, both only
+  after my yes. Follow that repository's rules for branch names and the pull request's form, but
+  push to its `main` only when I ask for it in this session.
+- In my own repositories the flow is the one their CLAUDE.md or CONTRIBUTING names. Where they
+  name none, the repository uses pull requests if it has a PR template, a hook that refuses pushes
+  to `main`, or merged pull requests (`gh pr list --state merged --limit 1`); otherwise merge by
+  fast-forward. If those signs disagree, ask me.
+- Fast-forward: `git push origin <branch>:main`, then delete the branch. If the push is rejected
+  because `main` moved, stop and tell me: never force, never merge `main` into the branch, rebase
+  only a branch that was never pushed, then show the new diff and ask again. Afterwards bring the
+  local `main` up to date (`git merge --ff-only origin/main`) before the next branch.
 
 ## Safe changes
 - Stage by path, never `git add -A` or `git add .`, and run `git diff <path>` before staging it:
