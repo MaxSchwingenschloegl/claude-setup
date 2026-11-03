@@ -184,6 +184,10 @@ check_cmdlet() {
         [[ -n $a && $a != -* && $a != '{'* ]] && ! local_computer "$a" && block "\`${words[at]} $a\`"
     fi
     for ((i = at + 1; i < n; i++)); do
+        # A parameter name is never quoted: a quoted "-Session" is a value. Only the name part
+        # counts, so -ComputerName:"srv" (a quoted value glued on) is still the parameter.
+        v=${seg_raw[i]-}
+        [[ -n $v && ${v%%:*} == *[\"\']* ]] && continue
         a=${words[i],,}
         case ${a%%:*} in
             -session | -cimsession | -tosession | -fromsession)

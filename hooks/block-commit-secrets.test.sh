@@ -179,6 +179,8 @@ check 0 Bash 'git status'
 PATH=$saved_path
 
 # Large commands stay well inside the timeout: a hook that times out lets the commit go unchecked
+# The limit catches a return of the old quadratic split (47 s and more at 30 KB), with room for a
+# busy machine: these commands take about 2 s under load, so a tighter limit only adds flaky runs.
 timed() {  # name, limit in ms, expected exit, command: the hook process alone is timed
     local name=$1 limit=$2 value=$4 cwd start ms got
     cwd=$(cygpath -w "$r")
@@ -207,10 +209,10 @@ while ((${#unclosed} < 60000)); do
     i=$((i + 1))
     unclosed+="echo step $i before the commit >> notes.log ; npm test -- --shard=$i ; git diff --stat"$'\n'
 done
-timed "compound command of ${#compound} bytes" 2000 0 "$compound"
-timed "script of ${#unclosed} bytes after an unclosed quote, then a commit" 2000 0 "$unclosed git commit -m x"
+timed "compound command of ${#compound} bytes" 5000 0 "$compound"
+timed "script of ${#unclosed} bytes after an unclosed quote, then a commit" 5000 0 "$unclosed git commit -m x"
 stage config.txt "$github"
-timed "the same with a staged secret" 2000 2 "$unclosed git commit -m x"
+timed "the same with a staged secret" 5000 2 "$unclosed git commit -m x"
 
 echo "$run cases, $fail failed"
 ((fail == 0))

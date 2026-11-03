@@ -293,6 +293,8 @@ check 0 Bash "$long"
 ((SECONDS - start < 5)) || { fail=$((fail + 1)); echo "FAIL a long command took $((SECONDS - start)) s"; }
 
 # Large commands stay well inside the timeout: a hook that times out lets the command run unchecked
+# The limit catches a return of the old quadratic split (47 s and more at 30 KB), with room for a
+# busy machine: these commands take about 2 s under load, so a tighter limit only adds flaky runs.
 timed() {  # name, limit in ms, expected exit, tool, command: the hook process alone is timed
     local name=$1 limit=$2 value=$5 cwd json start ms got
     cwd=$(cygpath -w "$repo")
@@ -327,12 +329,12 @@ while ((${#unclosed} < 60000)); do
 done
 dense="git status && echo \"unclosed "
 while ((${#dense} < 60000)); do dense+="word && git add src/x.py ; "; done
-timed "loop script of ${#loop} bytes" 2000 0 Bash "$loop"
-timed "compound command of ${#compound} bytes" 2000 0 Bash "$compound"
-timed "script of ${#unclosed} bytes after an unclosed quote" 2000 0 Bash "$unclosed"
-timed "the same with git add -A at its end" 2000 2 Bash "$unclosed git add -A"
+timed "loop script of ${#loop} bytes" 5000 0 Bash "$loop"
+timed "compound command of ${#compound} bytes" 5000 0 Bash "$compound"
+timed "script of ${#unclosed} bytes after an unclosed quote" 5000 0 Bash "$unclosed"
+timed "the same with git add -A at its end" 5000 2 Bash "$unclosed git add -A"
 # The worst case: 60 KB of nothing but short git commands, 2,200 of them, each one checked
-timed "${#dense} bytes of git add commands after an unclosed quote" 3000 2 Bash "$dense git add -A"
+timed "${#dense} bytes of git add commands after an unclosed quote" 5000 2 Bash "$dense git add -A"
 
 echo "$run cases, $fail failed"
 ((fail == 0))

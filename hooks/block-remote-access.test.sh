@@ -65,6 +65,18 @@ check 2 Bash 'rsync -a --exclude "*.tmp" ./dist/ [fe80::1]:/srv/'
 # Blocked: PowerShell remoting
 check 2 PowerShell 'Enter-PSSession -ComputerName build-01'
 check 2 PowerShell 'etsn build-01'
+# A parameter name is never quoted: quoted text that looks like one is a value
+check 0 PowerShell 'Set-Content -Path notes.txt -Value "-Session"'
+check 0 PowerShell "Write-Output '-ComputerName build-01'"
+check 0 PowerShell 'Add-Content log.txt "-cn build-01 is down"'
+check 2 PowerShell 'Get-Service -ComputerName build-01'
+check 2 PowerShell 'Invoke-Command -Session $s -ScriptBlock { hostname }'
+# ...but a quoted value glued to an unquoted name with a colon is still that parameter
+check 2 PowerShell 'Invoke-Command -ComputerName:"srv" { hostname }'
+check 2 PowerShell "Invoke-Command -ComputerName:'srv' { hostname }"
+check 2 PowerShell 'Get-Service -cn:"srv"'
+check 2 PowerShell 'Invoke-Command -Session:"$s" { hostname }'
+check 2 Bash "pwsh -c 'Get-Service -ComputerName:\"srv\"'"
 check 2 PowerShell '$s = New-PSSession -ComputerName build-01; Invoke-Command -Session $s -ScriptBlock { Get-Service }'
 check 2 PowerShell 'Invoke-Command -ComputerName build-01 -ScriptBlock { hostname }'
 check 2 PowerShell 'icm -cn build-01 { hostname }'
@@ -181,6 +193,8 @@ check 2 Bash 'ls'
 hook=$saved
 
 # Large commands stay well inside the timeout: a hook that times out lets the command run unchecked
+# The limit catches a return of the old quadratic split (47 s and more at 30 KB), with room for a
+# busy machine: these commands take about 2 s under load, so a tighter limit only adds flaky runs.
 timed() {  # name, limit in ms, expected exit, command: the hook process alone is timed
     local name=$1 limit=$2 value=$4 start ms got
     value=${value//\\/\\\\}
@@ -207,9 +221,9 @@ while ((${#unclosed} < 60000)); do
     i=$((i + 1))
     unclosed+="echo step $i of the deploy notes >> notes.log ; rsync -a dist/ backup/$i/ ; docker ps"$'\n'
 done
-timed "compound command of ${#compound} bytes" 2000 0 "$compound"
-timed "script of ${#unclosed} bytes after an unclosed quote" 2000 0 "$unclosed"
-timed "the same with ssh at its end" 2000 2 "$unclosed ssh build-01"
+timed "compound command of ${#compound} bytes" 5000 0 "$compound"
+timed "script of ${#unclosed} bytes after an unclosed quote" 5000 0 "$unclosed"
+timed "the same with ssh at its end" 5000 2 "$unclosed ssh build-01"
 
 echo "$run cases, $fail failed"
 ((fail == 0))
