@@ -51,6 +51,17 @@
             "timeout": 30
           }
         ]
+      },
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/block-commit-secrets.sh",
+            "shell": "bash",
+            "timeout": 60
+          }
+        ]
       }
     ]
   },

@@ -155,6 +155,8 @@ Run the dry run first and read it. The installer takes over what you had:
 | Telemetry, error reports, `/bug`, feedback survey off | yes | yes |
 | Transcripts kept 90 days (default 30) | yes | yes |
 | Deny rules for secret files | yes | yes |
+| Commit secret scan (`block-commit-secrets.sh`) | yes | yes |
+| Git guard: AI attribution, bulk staging, `--no-verify`, force pushes; a question before a push to main or a merge (`guard-git.sh`) | yes | – |
 | `CLAUDE.md`: evidence before success claims, numbers from executed code, language, skill vetting | yes | a header only |
 | `rules/git.md`: branch first, approval before outward actions, stage by path, no `--no-verify`, no Claude attribution | yes | – |
 | No Claude attribution in commits and pull requests (`attribution`) | yes | – |
@@ -360,7 +362,9 @@ newer Roslyn. `install.ps1` checks the plugin's start script, not the `csharp-ls
   broken, each of the three blocks every shell call with a message saying so, rather than letting
   commands through unchecked; restore the folder (`git checkout`, then `install.ps1`). Register
   each for the matcher `Bash|PowerShell` in your configuration's `settings.json`, like the two
-  above.
+  above. The templates register the commit secret scan (both) and the git guard (`recommended`,
+  which also turns attribution off). Neither registers the remote-access guard: refusing every
+  server is a personal policy, so add it yourself if it is yours.
 - `statusline/statusline.sh` shows the account, the model, the context fill and the five-hour and
   weekly limits, so you always see which account a session runs on. Claude Code can keep
   reporting a five-hour window for a plan that has none; list those plans' rate-limit tiers (as
