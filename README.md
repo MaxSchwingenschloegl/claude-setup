@@ -5,8 +5,8 @@ only its own login; rules, settings, plugins, history and memory are shared. A f
 set up with two clones and one script.
 
 **What lives here:** the tools: the installer (`install.ps1`), the PowerShell functions that
-switch accounts (`shell/`, `scripts/`), a plugin scan (`scripts/vet-plugins.ps1`), a secret
-guard and a search guard (`hooks/`), a status line (`statusline/`), skill groups as plugins you
+switch accounts (`shell/`, `scripts/`), a plugin scan (`scripts/vet-plugins.ps1`), guards
+for secrets, searches, git commands, commits and server access (`hooks/`), a status line (`statusline/`), skill groups as plugins you
 enable per project (`plugins/`) and two templates for your own configuration (`templates/`).
 **What never lives here:** your configuration. Accounts, settings, rules and global skills live
 in a folder of your own, ideally a private git repository, which `install.ps1` links into every
@@ -46,8 +46,8 @@ this repo
 ## Requirements
 
 - Windows 10 or 11, PowerShell 5.1 or 7
-- [Git for Windows](https://git-scm.com/download/win). Its Git Bash runs the secret guard and the
-  status line.
+- [Git for Windows](https://git-scm.com/download/win). Its Git Bash runs the hooks and the status
+  line.
 - [Claude Code](https://code.claude.com/docs/en/setup), signed in or not
 - **Developer Mode** (Settings > System > For developers) or an elevated PowerShell, for file
   symlinks. The installer checks this before it changes anything.
@@ -325,6 +325,42 @@ newer Roslyn. `install.ps1` checks the plugin's start script, not the `csharp-ls
   a part of the folder's name in `PROFILE_SEARCH_GUARD_EXTRA` (`;`-separated) in your own
   `settings.json` `env`. It reads the command text and the registry and opens no file in the
   profile. Tests: `bash hooks/block-profile-wide-search.test.sh`.
+- `hooks/guard-git.sh` is a PreToolUse hook for Bash and PowerShell that blocks git and gh
+  commands the git rules forbid: AI attribution (Co-Authored-By naming Claude, Claude-Session,
+  "Generated with Claude Code", a Claude author) in commit messages, pull requests and issues,
+  also from a here-document or a message file; bulk staging (`git add -A`, `.`, `:/`, `-u`, the
+  repository root, an exclude-only pathspec, `git commit -a`); skipped git hooks
+  (`--no-verify`, `git commit -n`, setting `core.hooksPath`); and force pushes in every form
+  (`--force`, `-fu`, `--force-with-lease`, `+branch`, `--mirror`, deleting main). A push to main
+  and the merge of a pull request (`gh pr merge`, `gh api .../merge`) it puts to you as a
+  permission question. Permission rules in `settings.json` match the start of a command only
+  (`Bash(git push --force*)` misses `git -C dir push --force`); this hook does not match the
+  command text either: it splits compound commands outside quotes and here-documents and looks
+  only at the program at command position, so a pull request body that mentions `git add -A`
+  passes. Tests: `bash hooks/guard-git.test.sh`.
+- `hooks/block-commit-secrets.sh` is a PreToolUse hook for Bash and PowerShell that scans what a
+  `git commit` would take (the staged changes; with `-a` or paths also the unstaged ones; with a
+  `git add` in the same command also the files it adds) for tokens, keys and secret assignments,
+  and names the file and the kind of secret, never the value. It needs no gitleaks and runs in
+  every repository. Per repository, `.claude/secret-patterns.txt` adds patterns (one regular
+  expression per line) and `.claude/secret-allowlist.txt` exempts paths such as test fixtures.
+  Tests: `bash hooks/block-commit-secrets.test.sh`.
+- `hooks/block-remote-access.sh` is a PreToolUse hook for Bash and PowerShell that blocks access
+  to a server: ssh, sftp, mosh, plink and the like, scp and rsync with a remote side, PowerShell
+  remoting (`Enter-PSSession`, `Invoke-Command <computer>`, `-ComputerName`, `-Session`), docker
+  against another host or context, kubectl and helm with another context or kubeconfig, also
+  behind `cmd /c`, `powershell -c`, `bash -c`, `xargs`, `watch` and `find -exec`. git with its
+  remote, gh, curl and `ssh-keygen` stay allowed, and so does `ssh git@github.com` (also GitLab,
+  Bitbucket, Azure DevOps) without a command and without `-o`, `-J` or `-F`. Deny rules in your
+  configuration are stricter where they say so: with `Bash(ssh *)` denied, `ssh -T
+  git@github.com` is still refused by the settings, although the hook lets it through. Tests:
+  `bash hooks/block-remote-access.test.sh`.
+- The three share `hooks/lib/command-segments.sh`, which splits a command line in time linear in
+  its length (a 60 KB command takes one to two seconds in Git Bash). If the library is missing or
+  broken, each of the three blocks every shell call with a message saying so, rather than letting
+  commands through unchecked; restore the folder (`git checkout`, then `install.ps1`). Register
+  each for the matcher `Bash|PowerShell` in your configuration's `settings.json`, like the two
+  above.
 - `statusline/statusline.sh` shows the account, the model, the context fill and the five-hour and
   weekly limits, so you always see which account a session runs on. Claude Code can keep
   reporting a five-hour window for a plan that has none; list those plans' rate-limit tiers (as
