@@ -3,7 +3,8 @@
     Scans the plugins your configuration enables with skillspector and records the results in
     the configuration's vetting.json.
 .DESCRIPTION
-    Covers every plugin settings.json enables and every plugin installed for all projects. An
+    Covers every plugin settings.json enables, every installed plugin whatever its scope (user,
+    project or local), and every plugin the projects named with -Project enable. An
     installed plugin is scanned where it is installed; one that is not installed yet is scanned
     in the local copy of its marketplace, before it ever runs. A plugin whose files have not
     changed since its recorded scan is not scanned again, even when its version label has
@@ -16,17 +17,22 @@
 
     Every LLM call of skillspector's semantic analysis goes through the local claude CLI
     (SKILLSPECTOR_PROVIDER=claude_cli, unless you set another provider) and counts against
-    your plan.
+    your plan. Claude Code keeps a transcript folder for each of those calls in the shared
+    projects folder; the script removes them after the scan.
 .PARAMETER Plugin
     Only these plugins, as name@marketplace or just the name.
 .PARAMETER Force
     Scan again even when the files have not changed since the recorded scan.
+.PARAMETER Project
+    Project folders whose .claude\settings.json and .claude\settings.local.json enable plugins
+    of their own; those plugins are covered too, installed or not.
 .PARAMETER ConfigDir
     Your configuration folder; by default the one install.ps1 remembered.
 #>
 param(
     [string[]]$Plugin,
     [switch]$Force,
+    [string[]]$Project,
     [string]$ConfigDir
 )
 
@@ -111,13 +117,21 @@ function Read-Report([string]$Path) {
 }
 
 $vetting = Read-PluginVetting
-$userPlugins = Get-UserPlugins
-$names = @(@(Get-EnabledPlugins) + @($userPlugins.Keys) | Sort-Object -Unique)
+$userPlugins = Get-UserPlugins -AnyScope
+# Plugins a project enables for itself; like the configuration's own, synced ones are left out
+$projectPlugins = foreach ($folder in @($Project -split ',' | ForEach-Object Trim | Where-Object { $_ })) {
+    if (-not (Test-Path -LiteralPath $folder)) { Write-Warning "No such project folder: $folder"; continue }
+    foreach ($file in 'settings.json', 'settings.local.json') {
+        $list = (Read-JsonFile (Join-Path $folder ".claude\$file")).enabledPlugins
+        if ($list) { $list.PSObject.Properties | Where-Object { $_.Value -and $_.Name -notlike '*@synced' } | ForEach-Object Name }
+    }
+}
+$names = @(@(Get-EnabledPlugins) + @($projectPlugins) + @($userPlugins.Keys) | Sort-Object -Unique)
 if ($Plugin) {
     $Plugin = @($Plugin -split ',' | ForEach-Object Trim | Where-Object { $_ })   # -File passes a,b as one string
     $names = @($names | Where-Object { $Plugin -contains $_ -or $Plugin -contains ($_ -split '@')[0] })
     $unknown = @($Plugin | Where-Object { $p = $_; -not ($names | Where-Object { $_ -eq $p -or ($_ -split '@')[0] -eq $p }) })
-    if ($unknown.Count) { Write-Warning "Neither enabled nor installed for all projects: $($unknown -join ', ')" }
+    if ($unknown.Count) { Write-Warning "Neither enabled nor installed: $($unknown -join ', '). A plugin only a project enables needs -Project <folder>." }
 }
 $reports = Join-Path $env:TEMP 'claude-setup-vetting'
 New-Item -ItemType Directory -Force $reports | Out-Null
@@ -125,78 +139,87 @@ $today = Get-Date -Format 'yyyy-MM-dd'
 $changed = $false
 $rows = @()
 
-foreach ($name in $names) {
-    $old = $vetting[$name]
-    $install = $userPlugins[$name]
-    if ($install -and (Test-Path -LiteralPath $install.Folder)) {
-        $folder = $install.Folder; $version = $install.Version; $commit = $install.Commit
-    } else {
-        $source = Get-PluginSource $name
-        if (-not $source -or -not $source.Folder) {
-            # Starting a session to fetch a marketplace would load the very plugins not scanned yet
-            $why = if ($source) { 'it comes from a remote repository. Install it with claude plugin install, then run this again before you start a session' }
-                   else { 'its marketplace is not on this machine. Add it with claude plugin marketplace add <owner/repo> (settings.json, extraKnownMarketplaces, names it), then run this again' }
-            Write-Warning "${name}: not installed and not scanned; $why."
+try {
+    foreach ($name in $names) {
+        $old = $vetting[$name]
+        $install = $userPlugins[$name]
+        if ($install -and (Test-Path -LiteralPath $install.Folder)) {
+            $folder = $install.Folder; $version = $install.Version; $commit = $install.Commit
+        } else {
+            $source = Get-PluginSource $name
+            if (-not $source -or -not $source.Folder) {
+                # Starting a session to fetch a marketplace would load the very plugins not scanned yet
+                $why = if ($source) { 'it comes from a remote repository. Install it with claude plugin install, then run this again before you start a session' }
+                       else { 'its marketplace is not on this machine. Add it with claude plugin marketplace add <owner/repo> (settings.json, extraKnownMarketplaces, names it), then run this again' }
+                Write-Warning "${name}: not installed and not scanned; $why."
+                continue
+            }
+            $folder = $source.Folder; $version = 'not installed'; $commit = $null
+        }
+        try { $hash = Get-PluginHash $folder $name }
+        catch { Write-Warning "Could not read the files of ${name}: $($_.Exception.Message)"; continue }
+
+        if ($old -and $old.hash -eq $hash -and -not $Force) {
+            # Same files as scanned: only the version label may have moved on
+            if ($install -and ($old.version -ne $version -or $old.commit -ne $commit)) {
+                $old | Add-Member -NotePropertyName version -NotePropertyValue $version -Force
+                $old | Add-Member -NotePropertyName commit -NotePropertyValue $commit -Force
+                $changed = $true
+            }
+            $rows += [pscustomobject]@{ Plugin = $name; Version = $version; Score = $old.score; Verdict = Get-PluginVerdict $old $hash; Note = "unchanged since $($old.scanned)" }
             continue
         }
-        $folder = $source.Folder; $version = 'not installed'; $commit = $null
-    }
-    try { $hash = Get-PluginHash $folder $name }
-    catch { Write-Warning "Could not read the files of ${name}: $($_.Exception.Message)"; continue }
 
-    if ($old -and $old.hash -eq $hash -and -not $Force) {
-        # Same files as scanned: only the version label may have moved on
-        if ($install -and ($old.version -ne $version -or $old.commit -ne $commit)) {
-            $old | Add-Member -NotePropertyName version -NotePropertyValue $version -Force
-            $old | Add-Member -NotePropertyName commit -NotePropertyValue $commit -Force
-            $changed = $true
+        Write-Host "Scanning $name ($version) ..."
+        $file = Join-Path $reports "$(($name -split '@')[0])-$($version -replace '[^\w.-]', '_').json"
+        if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file }
+        $ErrorActionPreference = 'Continue'   # skillspector logs warnings on stderr
+        $output = skillspector scan $folder --format json --output $file 2>&1
+        $exitCode = $LASTEXITCODE
+        $ErrorActionPreference = 'Stop'
+        # Exit code 2 with a report means an incomplete run, which is recorded as such
+        if (-not (Test-Path -LiteralPath $file)) {
+            Write-Warning "skillspector could not scan ${name} (exit code $exitCode): $(@($output | Where-Object { $_ -notmatch 'WARNING \[skillspector' }) -join ' ')"
+            continue
         }
-        $rows += [pscustomobject]@{ Plugin = $name; Version = $version; Score = $old.score; Verdict = Get-PluginVerdict $old $hash; Note = "unchanged since $($old.scanned)" }
-        continue
-    }
+        try { $result = Read-Report $file }
+        catch { Write-Warning "Could not read the report of ${name} (${file}): $($_.Exception.Message)"; continue }
+        if (-not $result.complete) {
+            Write-Warning ("${name}: the scan is incomplete ($($result.analysis)). A large plugin can run out of skillspector's " +
+                           'time limit, SKILLSPECTOR_MAX_WORKFLOW_SECONDS (600 by default); raise it and scan again with -Force.')
+        }
 
-    Write-Host "Scanning $name ($version) ..."
-    $file = Join-Path $reports "$(($name -split '@')[0])-$($version -replace '[^\w.-]', '_').json"
-    if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file }
-    $ErrorActionPreference = 'Continue'   # skillspector logs warnings on stderr
-    $output = skillspector scan $folder --format json --output $file 2>&1
-    $exitCode = $LASTEXITCODE
-    $ErrorActionPreference = 'Stop'
-    # Exit code 2 with a report means an incomplete run, which is recorded as such
-    if (-not (Test-Path -LiteralPath $file)) {
-        Write-Warning "skillspector could not scan ${name} (exit code $exitCode): $(@($output | Where-Object { $_ -notmatch 'WARNING \[skillspector' }) -join ' ')"
-        continue
-    }
-    try { $result = Read-Report $file }
-    catch { Write-Warning "Could not read the report of ${name} (${file}): $($_.Exception.Message)"; continue }
-    if (-not $result.complete) {
-        Write-Warning ("${name}: the scan is incomplete ($($result.analysis)). A large plugin can run out of skillspector's " +
-                       'time limit, SKILLSPECTOR_MAX_WORKFLOW_SECONDS (600 by default); raise it and scan again with -Force.')
-    }
-
-    $entry = [pscustomobject]@{
-        version = $version; commit = $commit; hash = $hash; scanned = $today
-        skillspector = $result.skillspector; provider = $env:SKILLSPECTOR_PROVIDER
-        score = $result.score; recommendation = $result.recommendation; issues = $result.issues
-        analysis = $result.analysis; semantic = $result.semantic
-    }
-    # Own notes survive a new scan; an approval only holds for the files it was given for
-    if ($old) {
-        foreach ($property in $old.PSObject.Properties | Where-Object { $fields -notcontains $_.Name }) {
-            $entry | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value
+        $entry = [pscustomobject]@{
+            version = $version; commit = $commit; hash = $hash; scanned = $today
+            skillspector = $result.skillspector; provider = $env:SKILLSPECTOR_PROVIDER
+            score = $result.score; recommendation = $result.recommendation; issues = $result.issues
+            analysis = $result.analysis; semantic = $result.semantic
         }
-        if ($old.approved -and $old.hash -eq $hash) {
-            $entry | Add-Member -NotePropertyName approved -NotePropertyValue $old.approved
-            $entry | Add-Member -NotePropertyName reasons -NotePropertyValue $old.reasons
-        } elseif ($old.approved) {
-            Write-Warning "${name}: the approval of $($old.approved) was given for other files; read the new findings and approve again if they hold."
+        # Own notes survive a new scan; an approval only holds for the files it was given for
+        if ($old) {
+            foreach ($property in $old.PSObject.Properties | Where-Object { $fields -notcontains $_.Name }) {
+                $entry | Add-Member -NotePropertyName $property.Name -NotePropertyValue $property.Value
+            }
+            if ($old.approved -and $old.hash -eq $hash) {
+                $entry | Add-Member -NotePropertyName approved -NotePropertyValue $old.approved
+                $entry | Add-Member -NotePropertyName reasons -NotePropertyValue $old.reasons
+            } elseif ($old.approved) {
+                Write-Warning "${name}: the approval of $($old.approved) was given for other files; read the new findings and approve again if they hold."
+            }
         }
+        $vetting[$name] = $entry
+        Save-Vetting $vetting   # at once: a later failure or Ctrl-C must not cost the scans made so far
+        $changed = $true
+        $rows += [pscustomobject]@{ Plugin = $name; Version = $version; Score = $entry.score; Verdict = Get-PluginVerdict $entry $hash; Note = "$($entry.issues); report $file" }
     }
-    $vetting[$name] = $entry
-    Save-Vetting $vetting   # at once: a later failure or Ctrl-C must not cost the scans made so far
-    $changed = $true
-    $rows += [pscustomobject]@{ Plugin = $name; Version = $version; Score = $entry.score; Verdict = Get-PluginVerdict $entry $hash; Note = "$($entry.issues); report $file" }
+} finally {
+    # skillspector's claude_cli provider runs one claude session per LLM call, and each leaves a
+    # transcript folder named after its temp directory; they are of no use after the scan, also
+    # one that ended in an error or Ctrl-C. A scan running at the same time loses its folders too.
+    Get-ChildItem -Directory -LiteralPath (Join-Path $L.Hub 'projects') -Filter '*-Temp-skillspector-cli-*' -ErrorAction SilentlyContinue |
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 }
+
 
 if ($changed) {
     Save-Vetting $vetting
