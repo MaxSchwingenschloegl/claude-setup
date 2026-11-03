@@ -89,6 +89,10 @@ attribution_reason="the text carries an AI attribution. Commits, pull requests a
 
 # True when the text attributes the work to Claude or Anthropic
 attributes_ai() {
+    # Bytes, not characters: in a UTF-8 locale Git Bash lowercases a character outside the BMP
+    # (the robot emoji) into something else, and the emoji form below never matched. Every
+    # pattern is ASCII apart from the emoji, which is matched as its bytes.
+    local LC_ALL=C
     local t=${1,,}
     t=${t//claude.md/}
     local by="(^|[^a-z])[a-z]+(-[a-z]+)*-by:[^$nl]*(claude|anthropic)"

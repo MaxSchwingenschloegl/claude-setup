@@ -196,6 +196,12 @@ check 2 Bash 'git add -- ":!secret.txt"'
 check 2 Bash "git add ':(exclude)*.log'"
 check 2 Bash 'git add ":^dist"'
 check 2 Bash 'git commit -m x -m "Generated with Claude Code"'
+# The robot emoji without the link: lowercasing it in a UTF-8 locale damaged the emoji in Git Bash,
+# so neither the emoji form nor the footer form matched
+check 2 Bash "git commit -m x -m '🤖 Generated with Claude Code'"
+check 2 PowerShell "gh pr create --title x --body 'Faster. 🤖 Generated with Claude'"
+# A dated line is no trailer, even beside CLAUDE.md and the word claude
+check 0 Bash "git commit -m 'Record the 2026-11-01: run' -m 'Touches CLAUDE.md and the claude rules'"
 check 2 Bash 'git commit -m "Fix" -m "Built fast, generated with [Claude Code](https://claude.com/claude-code)"'
 
 # Allowed: pushes that neither force nor reach main, merges by the user's own hand
