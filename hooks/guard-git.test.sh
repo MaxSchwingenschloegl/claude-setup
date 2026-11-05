@@ -58,6 +58,24 @@ EOF
 check 2 Bash 'git commit -m "x" -m "Claude-Session: https://claude.ai/code/session_123"'
 check 2 Bash 'git commit -m "x" -m "Assisted-by: claude-opus"'
 check 2 Bash "git commit -m 'x' --trailer 'Co-authored-by: Claude <noreply@anthropic.com>'"
+# A merge, a tag and a note write a message too; the same commands without the line pass
+check 2 Bash "git merge -m \"Merge feat\" -m \"$trailer\" feat"
+check 2 Bash "git merge --no-ff --message=\"Merge feat: $trailer\" feat"
+check 2 Bash 'git merge -F msg-ai.txt feat'
+check 2 Bash 'git -C sub merge --file=../msg-ai.txt feat'
+check 2 Bash "git tag -a v1 -m \"$trailer\""
+check 2 Bash 'git notes add -F msg-ai.txt HEAD'
+check 2 PowerShell "git merge -m 'x' -m '$trailer' feat"
+check 2 Bash 'git tag -aF msg-ai.txt v1'
+check 2 Bash 'git tag -sFmsg-ai.txt v1'
+check 0 Bash 'git tag -aF msg-ok.txt v1'
+check 0 Bash 'git tag -l "v1*"'
+check 0 Bash 'git merge --abort'
+check 0 Bash 'git merge -m "Merge feat" feat'
+check 0 Bash 'git merge -F msg-ok.txt feat'
+check 0 Bash 'git merge feat'
+check 0 Bash 'git tag -a v1 -m "Release 1"'
+check 0 Bash "git log --grep \"$trailer\""
 check 2 Bash 'git commit --author="Claude <noreply@anthropic.com>" -m x'
 check 2 Bash 'git -c user.name=Claude -c user.email=noreply@anthropic.com commit -m x'
 check 2 Bash "git -C sub commit -F - <<EOF

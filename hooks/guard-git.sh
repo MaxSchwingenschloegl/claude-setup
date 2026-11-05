@@ -14,7 +14,8 @@
 #   attribution forms (a footer line of its own, after the robot emoji, or with the link to Claude
 #   Code; in prose it is no attribution), in `git commit` (its -m and --trailer values, an
 #   --author, a here-document, what is piped into -F -, the file of -F/--file/-t/--template when it
-#   exists), in `gh pr ...`, `gh issue ...` and `gh release ...` (title, body, the file of
+#   exists), in `git merge`, `git tag` and `git notes` (-m/--message, a here-document, the file of
+#   -F/--file), in `gh pr ...`, `gh issue ...` and `gh release ...` (title, body, the file of
 #   --body-file/-F/--notes-file when it exists), and in `git config user.name|user.email`.
 #   "CLAUDE.md" alone is no attribution.
 # - Bulk staging: `git add` with -A, --all, -u, --update, --no-ignore-removal (also inside a group
@@ -251,6 +252,44 @@ check_git() {
             ((COMMIT_NOVERIFY)) && block "\`git commit -n\` / \`--no-verify\` skips the repository's git hooks. A failing hook is fixed or reported to the user, never skipped."
             segment_text
             with_files "$GIT_DIR_AT" "${COMMIT_FILES[@]}"
+            attributes_ai "$REPLY" && block "$attribution_reason" ;;
+        merge | tag | notes)
+            # They write a message too: -m and --message among the words, the file of -F/--file
+            local -a files=()
+            local k valued
+            # the short flags of each verb that take a value (-s signs a tag, but names a merge
+            # strategy)
+            case ${words[GIT_VERB]} in
+                merge) valued=msX ;;
+                tag) valued=mun ;;
+                notes) valued=mcC ;;
+            esac
+            for ((i = 0; i < ${#args[@]}; i++)); do
+                a=${args[i]}
+                case $a in
+                    --) break ;;
+                    --file=*) files+=("${a#*=}") ;;
+                    --file | -F) files+=("${args[i+1]}"); ((i++)) ;;
+                    --*) ;;
+                    -?*)
+                        # a group of short flags: -F takes the rest of the word or the next one
+                        # (`-aF msg.txt`); a flag before it that takes a value ends the group
+                        for ((k = 1; k < ${#a}; k++)); do
+                            case ${a:k:1} in
+                                F)
+                                    if ((k == ${#a} - 1)); then
+                                        files+=("${args[i+1]}"); ((i++))
+                                    else
+                                        files+=("${a:k+1}")
+                                    fi
+                                    break ;;
+                                *) [[ $valued == *"${a:k:1}"* ]] && break ;;
+                            esac
+                        done ;;
+                esac
+            done
+            segment_text
+            with_files "$GIT_DIR_AT" "${files[@]}"
             attributes_ai "$REPLY" && block "$attribution_reason" ;;
         push) check_push ;;
         config)

@@ -329,8 +329,8 @@ newer Roslyn. `install.ps1` checks the plugin's start script, not the `csharp-ls
   profile. Tests: `bash hooks/block-profile-wide-search.test.sh`.
 - `hooks/guard-git.sh` is a PreToolUse hook for Bash and PowerShell that blocks git and gh
   commands the git rules forbid: AI attribution (Co-Authored-By naming Claude, Claude-Session,
-  "Generated with Claude Code", a Claude author) in commit messages, pull requests and issues,
-  also from a here-document or a message file; bulk staging (`git add -A`, `.`, `:/`, `-u`, the
+  "Generated with Claude Code", a Claude author) in commit, merge, tag and note messages, pull
+  requests and issues, also from a here-document or a message file; bulk staging (`git add -A`, `.`, `:/`, `-u`, the
   repository root, an exclude-only pathspec, `git commit -a`); skipped git hooks
   (`--no-verify`, `git commit -n`, setting `core.hooksPath`); and force pushes in every form
   (`--force`, `-fu`, `--force-with-lease`, `+branch`, `--mirror`, deleting main). A push to main
@@ -342,8 +342,10 @@ newer Roslyn. `install.ps1` checks the plugin's start script, not the `csharp-ls
   passes. Tests: `bash hooks/guard-git.test.sh`.
 - `hooks/block-commit-secrets.sh` is a PreToolUse hook for Bash and PowerShell that scans what a
   `git commit` would take (the staged changes; with `-a` or paths also the unstaged ones; with a
-  `git add` in the same command also the files it adds) for tokens, keys and secret assignments,
-  and names the file and the kind of secret, never the value. It needs no gitleaks and runs in
+  `git add` in the same command also the files it adds, with `git add -f` ignored ones too) for
+  tokens and keys (GitHub, AWS, OpenAI, Anthropic, Slack, private key blocks, minisign) and
+  secret assignments, in the content and in the file names, and names the file and the kind of
+  secret, never the value (a secret in a file name is cut out of the path it shows). It needs no gitleaks and runs in
   every repository. Per repository, `.claude/secret-patterns.txt` adds patterns (one regular
   expression per line) and `.claude/secret-allowlist.txt` exempts paths such as test fixtures.
   Tests: `bash hooks/block-commit-secrets.test.sh`.

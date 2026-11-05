@@ -12,9 +12,16 @@
 # Scanned, as added lines only: the staged changes (`git diff --cached`, one git call); with -a,
 # --all or paths on the commit also the unstaged changes of tracked files; and when a `git add`
 # comes before the commit in the same command, the unstaged and untracked files that add names
-# (up to 200 untracked files), since it stages them only after this hook ran.
+# (up to 200 untracked files), since it stages them only after this hook ran; with `git add -f`
+# also its ignored files. Every token and key shape below (not the minisign header and not the
+# assignment rule) and every extra pattern is also looked for in the names of the files the commit
+# takes, since a key that became a file name shows in no line (a command that bound its arguments
+# the wrong way round, Set-Content with the key read from a prompt as the path).
 # Secrets: GitHub tokens (ghp_, gho_, ghu_, ghs_, ghr_, github_pat_), AWS access keys (AKIA, ASIA),
 # private key blocks (-----BEGIN ... PRIVATE KEY-----, PGP included), Slack tokens (xoxa/b/p/r/s-),
+# OpenAI keys (sk-, sk-proj-, sk-svcacct-, sk-admin-, with the T3BlbkFJ marker every one of them
+# carries) and Anthropic keys (sk-ant-api03-, sk-ant-admin01-, sk-ant-oat01-), in the shapes
+# gitleaks uses (a little wider: lengths as minimums, OAuth tokens added),
 # minisign secret keys, and an assignment to a name ending in API_KEY, APIKEY, TOKEN or SECRET
 # (any case, = or :) of a value of 20 or more characters with a letter and a digit, unless it
 # reads like a placeholder (example, placeholder, changeme, dummy, redacted, your, xxxx, sample).
@@ -22,7 +29,8 @@
 #   .claude/secret-patterns.txt   one extended regular expression (gawk) per line, # comments
 #   .claude/secret-allowlist.txt  one path or glob per line (relative to the root, * crosses /),
 #                                 a line ending in / exempts a folder; for test fixtures
-# The block names the file and the kind of secret, never the value.
+# The block names the file and the kind of secret, never the value; every secret shape in a path
+# is shown as <the secret>. The allowlist is matched against the real path.
 # A missing or broken lib/command-segments.sh blocks every shell call, and a commit when git is
 # not on PATH (exit 2), so a broken install shows instead of letting commits through unchecked.
 #
@@ -60,8 +68,8 @@ field cwd 4096
 resolve_path / "${REPLY:-$PWD}"
 CS_CWD=$REPLY
 
-# Reads a unified diff on stdin (mode=diff) or whole files (mode=files) and prints
-# "<path><TAB><kind>" once per file and kind of secret found
+# Reads a unified diff on stdin (mode=diff), whole files (mode=files) or NUL-separated file names
+# (mode=names) and prints "<path><TAB><path as shown><TAB><kind>" once per file and kind found
 read -r -d '' scanner << 'AWK'
 BEGIN {
     n = 0
@@ -70,6 +78,8 @@ BEGIN {
     kind[++n] = "AWS access key";              re[n] = "(AKIA|ASIA)[0-9A-Z]{16}"
     kind[++n] = "private key block";           re[n] = "-----BEGIN [A-Z ]*PRIVATE KEY( BLOCK)?-----"
     kind[++n] = "Slack token";                 re[n] = "xox[abprs]-[A-Za-z0-9-]{10,}"
+    kind[++n] = "OpenAI API key";              re[n] = "sk-((proj|svcacct|admin)-)?[A-Za-z0-9_-]{20,}T3BlbkFJ[A-Za-z0-9_-]{20,}"
+    kind[++n] = "Anthropic API key";           re[n] = "sk-ant-(api|admin|oat)[0-9]{2}-[A-Za-z0-9_-]{80,}"
     if (extra != "") {
         k = 0
         while ((getline pat < extra) > 0) {
@@ -81,8 +91,22 @@ BEGIN {
         close(extra)
     }
 }
+# The path as it may be shown: every secret shape in it cut out, all of them before any line is
+# printed, since a name can hold two (review, 2026-11-05)
+function shown(path,    i) {
+    for (i = 1; i <= n; i++) gsub(re[i], "<the secret>", path)
+    return path
+}
+# Prints "<path><TAB><path as shown><TAB><kind>"; the first is for the allowlist only
 function found(what) {
-    if (!((file, what) in seen)) { seen[file, what] = 1; print file "\t" what }
+    if (!((file, what) in seen)) { seen[file, what] = 1; print file "\t" shown(file) "\t" what }
+}
+mode == "names" {
+    # one file name per record
+    file = $0
+    for (i = 1; i <= n; i++)
+        if (file ~ re[i]) found(kind[i] " in the file name")
+    next
 }
 {
     if (mode == "diff") {
@@ -119,19 +143,28 @@ scan() {
     root=$REPLY
     local extra=$root/.claude/secret-patterns.txt
     [[ -f $extra ]] || extra=
-    if [[ $1 == untracked ]]; then
+    if [[ $1 == untracked || $1 == untracked-and-ignored ]]; then
+        # `git add -f` stages ignored files too
+        local -a list=(--others --exclude-standard)
+        [[ $1 == untracked-and-ignored ]] && list=(--others)
         shift
-        local -a files=()
+        local -a files=() names=()
         while IFS= read -r -d '' path; do
             files+=("$root/./$path")
+            names+=("$path")
             ((${#files[@]} >= 200)) && break
-        done < <(git -C "$dir" ls-files -z --others --exclude-standard --full-name "$@" 2> /dev/null)
+        done < <(git -C "$dir" ls-files -z "${list[@]}" --full-name "$@" 2> /dev/null)
         ((${#files[@]})) || return 0
         out=$(LC_ALL=C awk -v mode=files -v extra="$extra" "$scanner" "${files[@]}" 2> /dev/null)
+        out+=$nl$(printf '%s\0' "${names[@]}" | LC_ALL=C awk -v RS='\0' -v mode=names -v extra="$extra" "$scanner" 2> /dev/null)
     else
         out=$(git -C "$dir" -c core.quotepath=false diff --unified=0 --no-color --no-ext-diff --no-textconv "$@" 2> /dev/null |
             LC_ALL=C awk -v mode=diff -v extra="$extra" "$scanner" 2> /dev/null)
+        out+=$nl$(git -C "$dir" -c core.quotepath=false diff --name-only -z --diff-filter=d --no-ext-diff "$@" 2> /dev/null |
+            LC_ALL=C awk -v RS='\0' -v mode=names -v extra="$extra" "$scanner" 2> /dev/null)
     fi
+    out=${out#$nl}
+    out=${out%$nl}
     [[ -n $out ]] || return 0
     local -a allow=()
     if [[ -f $root/.claude/secret-allowlist.txt ]]; then
@@ -152,7 +185,8 @@ scan() {
                 [[ $path == $entry ]] && exempt=1
             fi
         done
-        ((exempt)) || hits+="  $path: ${line#*$'\t'}$nl"
+        line=${line#*$'\t'}
+        ((exempt)) || hits+="  ${line%%$'\t'*}: ${line#*$'\t'}$nl"
     done <<< "$out"
 }
 
@@ -161,7 +195,7 @@ adds=()   # "<folder><US><pathspec><US>..." of every git add before the commit
 us=$'\x1f'
 
 on_segment() {
-    local i a after=0 entry
+    local i a after=0 entry force=0
     local -a specs=() parts=()
     git_split
     case ${words[GIT_VERB]} in
@@ -172,13 +206,15 @@ on_segment() {
                     case $a in
                         --) after=1; continue ;;
                         --chmod | --pathspec-from-file) ((i++)); continue ;;
-                        -*) continue ;;
+                        --f | --fo | --for | --forc | --force) force=1; continue ;;
+                        --*) continue ;;
+                        -*) [[ ${a:1} == *f* ]] && force=1; continue ;;
                     esac
                 fi
                 specs+=("$a")
             done
             ((${#specs[@]})) || specs=(":/")
-            entry=$GIT_DIR_AT
+            entry=$GIT_DIR_AT$us$force
             for a in "${specs[@]}"; do entry+=$us$a; done
             adds+=("$entry") ;;
         commit)
@@ -195,8 +231,12 @@ on_segment() {
             fi
             for entry in "${adds[@]}"; do
                 IFS=$us read -r -a parts <<< "$entry"
-                scan "${parts[0]}" -- "${parts[@]:1}"
-                scan "${parts[0]}" untracked -- "${parts[@]:1}"
+                scan "${parts[0]}" -- "${parts[@]:2}"
+                if ((parts[1])); then
+                    scan "${parts[0]}" untracked-and-ignored -- "${parts[@]:2}"
+                else
+                    scan "${parts[0]}" untracked -- "${parts[@]:2}"
+                fi
             done
             adds=()
             if [[ -n $hits ]]; then

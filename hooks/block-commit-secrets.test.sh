@@ -128,6 +128,67 @@ printf 'caf\xe9 %s\n' "$github" > "$r/latin1.txt"
 git -C "$r" add latin1.txt
 check 2 Bash 'git commit -m x'
 
+# OpenAI and Anthropic keys in the shapes gitleaks uses; text that only starts like one is none
+body20=$(printf 'Ab3dE%.0s' {1..4})
+openai_project="sk-proj-${body20}_x9T3Blbk""FJ${body20}-y8"
+openai_legacy="sk-${body20}T3Blbk""FJ${body20}"
+anthropic="sk-ant-api03-$(printf 'Zr2mT5vX9k%.0s' {1..9})AA"
+anthropic_oauth="sk-ant-oat01-$(printf 'Zr2mT5vX9k%.0s' {1..9})AA"
+for secret in "$openai_project" "$openai_legacy" "$anthropic" "$anthropic_oauth""client = OpenAI(api_key=\"$openai_project\")"; do
+    fresh
+    stage config.txt "$secret"
+    check 2 Bash 'git commit -m x'
+done
+for harmless in 'see sk-learn and the disk-usage-report-for-the-whole-cluster-nodes docs' "sk-proj-${body20}${body20}" 'sk-ant-api03-short'; do
+    fresh
+    stage config.txt "$harmless"
+    check 0 Bash 'git commit -m x'
+done
+
+# A secret that became a file name: staged (also empty, which shows no diff line), or added in
+# the same command; the block shows the path with the secret cut out
+fresh
+stage "notes/$github" 'C:\Users\someone\.config\key.txt'
+check 2 Bash 'git commit -m x'
+grep -q 'notes/<the secret>: GitHub token in the file name' "$tmp/stderr" || { fail=$((fail + 1)); echo "FAIL the block does not show the redacted name: $(cat "$tmp/stderr")"; }
+grep -q "$github" "$tmp/stderr" && { fail=$((fail + 1)); echo "FAIL the block shows the secret from the file name"; }
+run=$((run + 2))
+# Every secret in a path is cut out before any line is printed: two in one name, and a name with
+# a secret beside content with another; an exact allowlist entry still names the real path
+fresh
+stage "fixtures/k-$github-$aws.txt" 'x'
+stage "src/k-$slack.txt" "$aws"
+check 2 Bash 'git commit -m x'
+grep -q -e "$github" -e "$aws" -e "$slack" "$tmp/stderr" && { fail=$((fail + 1)); echo "FAIL the block shows a secret from a path: $(cat "$tmp/stderr")"; }
+grep -q 'src/k-<the secret>.txt: AWS access key' "$tmp/stderr" || { fail=$((fail + 1)); echo "FAIL the content finding does not show the cut path: $(cat "$tmp/stderr")"; }
+run=$((run + 2))
+mkdir -p "$r/.claude"
+printf 'fixtures/k-%s-%s.txt\nsrc/\n' "$github" "$aws" > "$r/.claude/secret-allowlist.txt"
+check 0 Bash 'git commit -m x'
+fresh
+: > "$r/$openai_legacy"
+git -C "$r" add -- "$openai_legacy"
+check 2 Bash 'git commit -m x'
+fresh
+printf 'x\n' > "$r/$aws"
+check 0 Bash 'git commit -m x'
+check 2 Bash "git add $aws && git commit -m x"
+check 2 Bash 'git add . && git commit -m x'
+git -C "$r" add -- "$aws"
+git -C "$r" commit -q -m 'the key as a name'
+git -C "$r" rm -q -- "$aws"
+check 0 Bash 'git commit -m "Remove the file"'
+
+# git add -f stages an ignored file, so its content counts; without -f git refuses to add it
+fresh
+printf 'local.txt\n' > "$r/.gitignore"
+printf '%s\n' "$aws" > "$r/local.txt"
+check 0 Bash 'git add local.txt && git commit -m x'
+check 2 Bash 'git add -f local.txt && git commit -m x'
+check 2 Bash 'git add --force local.txt && git commit -m x'
+check 2 Bash 'git add --fo local.txt && git commit -m x'
+check 2 PowerShell 'git add -vf local.txt; git commit -m x'
+
 # Per-repository allowlist and extra patterns
 fresh
 stage tests/fixtures/token.txt "$github"
