@@ -92,6 +92,14 @@ check 2 Bash 'git commit -F - <<EOF
 Add settings
 EOF'
 check 2 Bash 'cmd //c "git commit -m x"'
+# a folder the hook cannot resolve (a variable): the payload's cwd is scanned instead
+check 2 Bash 'd=. && git -C "$d" commit -m x'
+check 2 Bash 'cd "$d" && git commit -m x'
+check 2 PowerShell 'Set-Location $d; git commit -m x'
+check 0 Bash 'git -C "$d" commit -m x' "$elsewhere"
+# ...the folder the shell was in before it, not the one it started in
+check 2 Bash "cd $r && git -C \"\$d\" commit -m x" "$elsewhere"
+check 0 Bash "cd $elsewhere && git -C \"\$d\" commit -m x"
 check 0 Bash 'git commit -m x' "$elsewhere"
 check 0 Bash 'git status'
 check 0 Bash 'git diff --cached'
@@ -121,6 +129,19 @@ check 2 Bash 'git add . && git commit -m x'
 check 2 PowerShell 'git add new.txt; git commit -m x'
 check 0 Bash 'git add other.txt && git commit -m x'
 check 0 Bash 'git add new.txt'
+
+# Up to 200 untracked files are read; past them the commit is blocked instead of passing unread
+fresh
+for i in $(seq -w 1 200); do echo clean > "$r/f$i.txt"; done
+check 0 Bash 'git add f*.txt && git commit -m x'
+echo clean > "$r/f201.txt"
+check 2 Bash 'git add f*.txt && git commit -m x'
+grep -q 'more than 200 untracked files' "$tmp/stderr" || { fail=$((fail + 1)); echo "FAIL the cap block does not say why: $(cat "$tmp/stderr")"; }
+run=$((run + 1))
+check 0 Bash 'git add -u && git commit -m x'
+check 0 Bash 'git add -n . && git commit -m x'
+git -C "$r" add -- 'f*.txt'
+check 0 Bash 'git commit -m x'
 
 # A byte that is no valid UTF-8 next to the secret does not hide it
 fresh

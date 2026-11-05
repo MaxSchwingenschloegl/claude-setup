@@ -8,11 +8,15 @@
 # A commit is a `git ... commit` at command position (lib/command-segments.sh): behind -C/-c and
 # the other global options, wrappers and in compound commands, not inside a message. It runs in the
 # payload's cwd, followed through `cd <dir>` before it and every `git -C <dir>`; when that folder
-# does not exist (a variable) or is no repository, the commit is not checked.
+# does not exist (a variable: `git -C "$d"`, `cd "$d"`), the folder the shell was in before it is
+# scanned instead, and when it is no repository, the commit is not checked.
 # Scanned, as added lines only: the staged changes (`git diff --cached`, one git call); with -a,
 # --all or paths on the commit also the unstaged changes of tracked files; and when a `git add`
 # comes before the commit in the same command, the unstaged and untracked files that add names
-# (up to 200 untracked files), since it stages them only after this hook ran; with `git add -f`
+# (tracked files only for -u, nothing for -n)
+# (up to 200 untracked files; past them the commit is blocked, since the rest would go unread:
+# stage in a command of its own, then commit, and the staged scan has no limit), since it stages
+# them only after this hook ran; with `git add -f`
 # also its ignored files. Every token and key shape below (not the minisign header and not the
 # assignment rule) and every extra pattern is also looked for in the names of the files the commit
 # takes, since a key that became a file name shows in no line (a command that bound its arguments
@@ -138,6 +142,9 @@ AWK
 scan() {
     local dir=$1 root out line path entry exempt
     shift
+    # A folder the hook cannot resolve (`git -C "$d"`, `cd "$d"`): its nearest existing parent is
+    # the folder the shell was in before it, the last one the hook could follow
+    while [[ ! -d $dir && $dir == */* ]]; do dir=${dir%/*}; done
     [[ -d $dir ]] || return 0
     repo_root "$dir" || return 0
     root=$REPLY
@@ -150,9 +157,12 @@ scan() {
         shift
         local -a files=() names=()
         while IFS= read -r -d '' path; do
+            if ((${#files[@]} >= 200)); then
+                capped=1
+                break
+            fi
             files+=("$root/./$path")
             names+=("$path")
-            ((${#files[@]} >= 200)) && break
         done < <(git -C "$dir" ls-files -z "${list[@]}" --full-name "$@" 2> /dev/null)
         ((${#files[@]})) || return 0
         out=$(LC_ALL=C awk -v mode=files -v extra="$extra" "$scanner" "${files[@]}" 2> /dev/null)
@@ -191,11 +201,12 @@ scan() {
 }
 
 hits=""
+capped=0
 adds=()   # "<folder><US><pathspec><US>..." of every git add before the commit
 us=$'\x1f'
 
 on_segment() {
-    local i a after=0 entry force=0
+    local i a after=0 entry force=0 update=0 dry=0
     local -a specs=() parts=()
     git_split
     case ${words[GIT_VERB]} in
@@ -207,14 +218,28 @@ on_segment() {
                         --) after=1; continue ;;
                         --chmod | --pathspec-from-file) ((i++)); continue ;;
                         --f | --fo | --for | --forc | --force) force=1; continue ;;
+                        --update) update=1; continue ;;
+                        --dry-run) dry=1; continue ;;
                         --*) continue ;;
-                        -*) [[ ${a:1} == *f* ]] && force=1; continue ;;
+                        -*)
+                            [[ ${a:1} == *f* ]] && force=1
+                            [[ ${a:1} == *u* ]] && update=1
+                            [[ ${a:1} == *n* ]] && dry=1
+                            continue ;;
                     esac
                 fi
                 specs+=("$a")
             done
+            ((dry)) && return 0   # stages nothing
             ((${#specs[@]})) || specs=(":/")
-            entry=$GIT_DIR_AT$us$force
+            # the mode: f (also ignored files), u (tracked files only) or n (untracked as well)
+            if ((update)); then
+                entry=$GIT_DIR_AT${us}u
+            elif ((force)); then
+                entry=$GIT_DIR_AT${us}f
+            else
+                entry=$GIT_DIR_AT${us}n
+            fi
             for a in "${specs[@]}"; do entry+=$us$a; done
             adds+=("$entry") ;;
         commit)
@@ -232,17 +257,20 @@ on_segment() {
             for entry in "${adds[@]}"; do
                 IFS=$us read -r -a parts <<< "$entry"
                 scan "${parts[0]}" -- "${parts[@]:2}"
-                if ((parts[1])); then
-                    scan "${parts[0]}" untracked-and-ignored -- "${parts[@]:2}"
-                else
-                    scan "${parts[0]}" untracked -- "${parts[@]:2}"
-                fi
+                case ${parts[1]} in
+                    f) scan "${parts[0]}" untracked-and-ignored -- "${parts[@]:2}" ;;
+                    n) scan "${parts[0]}" untracked -- "${parts[@]:2}" ;;
+                esac
             done
             adds=()
             if [[ -n $hits ]]; then
                 echo "Blocked by the claude-setup commit secret guard: the changes this commit takes look like they hold a secret:" >&2
                 printf '%s' "$hits" >&2
                 echo "Take the secret out of the file (an environment variable, the credential store, a gitignored file) and unstage it. If it is a test fixture or a placeholder, ask the user to list the path in .claude/secret-allowlist.txt." >&2
+                exit 2
+            fi
+            if ((capped)); then
+                echo "Blocked by the claude-setup commit secret guard: the git add in this command takes more than 200 untracked files, and this hook reads no more than that. Stage the files in a command of their own (git add <paths>), then commit in another: the scan of staged changes has no limit." >&2
                 exit 2
             fi ;;
     esac
