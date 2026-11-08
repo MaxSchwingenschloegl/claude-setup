@@ -68,7 +68,8 @@
   "statusLine": {
     "type": "command",
     "command": "bash ~/.claude/statusline/statusline.sh",
-    "padding": 0
+    "padding": 0,
+    "refreshInterval": 5
   },
   "cleanupPeriodDays": 90
 }

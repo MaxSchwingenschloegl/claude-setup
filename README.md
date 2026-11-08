@@ -367,8 +367,12 @@ newer Roslyn. `install.ps1` checks the plugin's start script, not the `csharp-ls
   above. The templates register the commit secret scan (both) and the git guard (`recommended`,
   which also turns attribution off). Neither registers the remote-access guard: refusing every
   server is a personal policy, so add it yourself if it is yours.
-- `statusline/statusline.sh` shows the account, the model, the context fill and the five-hour and
-  weekly limits, so you always see which account a session runs on. Claude Code can keep
+- `statusline/statusline.sh` shows the account, the model, `⦿ remote` while Remote Control is
+  connected, the context fill and the five-hour and weekly limits, so you always see which
+  account a session runs on and whether a phone or the web can still drive it. The mark follows
+  `CLAUDE_CODE_BRIDGE_SESSION_ID`, which Claude Code sets for the length of a connection; the
+  templates' `refreshInterval` of 5 seconds lets it come and go while the session is idle.
+  Tests: `bash statusline/statusline.test.sh`. Claude Code can keep
   reporting a five-hour window for a plan that has none; list those plans' rate-limit tiers (as
   in each account's `.claude.json`, `oauthAccount`, e.g. `default_claude_max_20x`) in
   `STATUSLINE_NO_FIVE_HOUR`, space-separated, in your configuration's `settings.json` under

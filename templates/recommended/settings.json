@@ -89,7 +89,8 @@
   "statusLine": {
     "type": "command",
     "command": "bash ~/.claude/statusline/statusline.sh",
-    "padding": 0
+    "padding": 0,
+    "refreshInterval": 5
   },
   "enabledPlugins": {
     "feature-dev@claude-plugins-official": true,
