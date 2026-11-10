@@ -181,8 +181,62 @@ if [[ $tool == Grep || $tool == Glob ]]; then
     exit 0
 fi
 
-# Words and separators, quotes kept together and removed afterwards
-word='(([^][:space:]'"'"'";|&()<>]|[][])+|'"'"'[^'"'"']*'"'"'|"([^"\\]|\\.)*")+'
+# Words and separators, quotes kept together and removed afterwards. In bash, outside quotes, a
+# backslash escapes a shell character, a space or a backslash (`find src \( -name a \)`,
+# `~/Team\ Files`), so \( is the word ( rather than a word \, which would read as the drive root,
+# and a backslash ending a line continues it. Not in PowerShell, where \ ends a path
+# (`dir C:\ -Recurse`). X:\ before such a character stays a drive root, as cmd /c would get it.
+escaped=
+if [[ $tool == Bash ]]; then
+    command=${command//$'\\\n'/}
+    if [[ $command == *:\\* ]]; then
+        for c in ' ' '(' ')' '|' '&' ';' '<' '>' '!'; do command=${command//":\\$c"/":\\\\$c"}; done
+    fi
+    # A backslash only together with the character after it, so \\ is read as one pair
+    escaped='\\.|'
+fi
+plain='[^][:space:]'"'"'";|&()<>]'
+[[ -n $escaped ]] && plain='[^][:space:]'"'"'";|&()<>\\]'
+# REPLY: a bash word with its quotes removed and each escape read as bash reads it, the pairs the
+# word pattern took. Outside quotes a shell character, space, backslash or quote after \ is that
+# character; before anything else the backslash stays, so C:\Users stays a path. In double quotes
+# \ before \ " $ or ` is that character. It jumps from one \ ' " to the next, as one character at
+# a time costs seconds on a long quoted word in Git Bash.
+unescape() {
+    local s=$1 out= head nx
+    while [[ -n $s ]]; do
+        head=${s%%[\\\'\"]*}
+        out+=$head
+        s=${s:${#head}}
+        case ${s:0:1} in
+            "'")
+                s=${s:1}
+                head=${s%%\'*}
+                out+=$head
+                s=${s:${#head}+1} ;;
+            '"')
+                s=${s:1}
+                while [[ -n $s ]]; do
+                    head=${s%%[\\\"]*}
+                    out+=$head
+                    s=${s:${#head}}
+                    [[ -z $s ]] && break
+                    [[ ${s:0:1} == '"' ]] && { s=${s:1}; break; }
+                    nx=${s:1:1}
+                    [[ -n $nx && '\"$`' == *"$nx"* ]] || out+='\'
+                    out+=$nx
+                    s=${s:2}
+                done ;;
+            '\')
+                nx=${s:1:1}
+                [[ -n $nx && " ()|&;<>!\\'\"" == *"$nx"* ]] || out+='\'
+                out+=$nx
+                s=${s:2} ;;
+        esac
+    done
+    REPLY=$out
+}
+word='(('"$escaped$plain"'|[][])+|'"'"'[^'"'"']*'"'"'|"([^"\\]|\\.)*")+'
 sep='&&|\|\||[;|&()<>]|'$'\n'
 rest=$command
 segment=()
@@ -261,8 +315,13 @@ while [[ -n $rest ]]; do
     elif [[ $rest =~ ^($word) ]]; then
         tok=${BASH_REMATCH[0]}
         rest=${rest:${#tok}}
-        tok=${tok//\'/}
-        tok=${tok//\"/}
+        if [[ -n $escaped && $tok == *\\* ]]; then
+            unescape "$tok"
+            tok=$REPLY
+        else
+            tok=${tok//\'/}
+            tok=${tok//\"/}
+        fi
         segment+=("$tok")
     else
         rest=${rest:1}

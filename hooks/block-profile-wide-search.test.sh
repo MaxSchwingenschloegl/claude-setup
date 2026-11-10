@@ -17,7 +17,7 @@ project='C:\Users\tester\Documents\GitHub\proj'
 # named Ölwerk arrives with a single byte 0xD6 where a command carries two bytes of UTF-8
 reg_output=$(mktemp)
 trap 'rm -f "$reg_output"' EXIT
-printf '%b' 'HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\SyncRootManager\\OneDrive!S-1!Business1|abc\\UserSyncRoots\r\n    S-1-5-21-1    REG_SZ    C:\\Users\\tester\\\xd6lwerk\\Lib A\r\n\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\SyncRootManager\\Dropbox!S-1!x\r\n    IconResource    REG_SZ    C:\\Program Files\\Dropbox\\Dropbox.exe,-1\r\n    DisplayNameResource    REG_SZ    Dropbox\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\SyncRootManager\\Dropbox!S-1!x\\UserSyncRoots\r\n    S-1-5-21-1    REG_SZ    D:\\Sync\\Team Files\r\n' > "$reg_output"
+printf '%b' 'HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\SyncRootManager\\OneDrive!S-1!Business1|abc\\UserSyncRoots\r\n    S-1-5-21-1    REG_SZ    C:\\Users\\tester\\\xd6lwerk\\Lib A\r\n\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\SyncRootManager\\Dropbox!S-1!x\r\n    IconResource    REG_SZ    C:\\Program Files\\Dropbox\\Dropbox.exe,-1\r\n    DisplayNameResource    REG_SZ    Dropbox\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\SyncRootManager\\Dropbox!S-1!x\\UserSyncRoots\r\n    S-1-5-21-1    REG_SZ    D:\\Sync\\Team Files\r\n    S-1-5-21-2    REG_SZ    C:\\Users\\tester\\Dropbox (Contoso)\r\n    S-1-5-21-3    REG_SZ    C:\\Users\\tester\\(Team) Files\r\n' > "$reg_output"
 export SEARCH_GUARD_REG_OUTPUT=$reg_output
 
 check() {  # expected exit, tool, field, value[, cwd]
@@ -89,6 +89,33 @@ check 2 PowerShell command 'Get-ChildItem -Path $env:USERPROFILE -Recurse -Filte
 check 2 PowerShell command 'gci ~ -r'
 check 2 PowerShell command 'Get-ChildItem C:\Users\tester -Depth 3'
 check 2 Bash command 'cmd //c dir /s C:\Users\tester'
+# A backslash before a shell character, a space or a backslash is an escape in bash, outside
+# quotes; a backslash ending a line continues it; X:\ before one stays a drive, as cmd reads it
+check 2 Bash command 'find ~ \( -name a -o -name b \) -print'
+check 2 Bash command 'find \( -name a \) -print' 'C:\Users\tester'
+check 2 Bash command 'find \! -name x' 'C:\Users\tester'
+check 2 Bash command 'grep -rn foo\|bar ~'
+check 2 Bash command 'grep -rn \<foo\> ~'
+check 2 Bash command 'find /d/Sync/Team\ Files -name a'
+check 2 Bash command 'find /c/Users/tester/Library/Mobile\ Documents -name a'
+check 2 Bash command 'find /c/Users/tester/Ölwerk/Lib\ A -name a'
+check 2 Bash command 'find ~/Dropbox\ \(Contoso\) -name x'
+check 2 Bash command 'rg foo ~/Dropbox\ \(Contoso\)/Shared'
+check 2 Bash command 'find \"~\" ~/Dropbox\ \(Contoso\) -name x'
+check 2 Bash command 'find "C:\Users\tester\(Team) Files" -name a'
+check 2 Bash command "find 'C:\Users\tester\(Team) Files' -name a"
+check 2 Bash command 'find C:\\Users\\tester -name x'
+check 2 Bash command 'find "C:\\Users\\tester\\" -name x'
+check 2 Bash command 'ls -R "C:\\Users\\tester\\\\"'
+check 2 Bash command 'find C:\ -name x'
+check 2 Bash command 'cmd //c dir /s C:\ /b'
+check 2 Bash command 'cmd //c dir /s /b C:\>files.txt'
+check 2 Bash command $'grep -rn foo \\\n  ~'
+check 2 Bash command $'find \\\n  ~ -name x'
+check 2 Bash command $'find \\\n~ -name x'
+check 2 Bash command $'echo a \\\n && find ~ -name x'
+check 2 PowerShell command 'Get-ChildItem C:\ -Recurse'
+check 2 PowerShell command 'gci -r C:\Users\tester\| Measure-Object'
 check 2 Grep path 'C:\Users\tester'
 check 2 Grep path '/c/Users/tester/OneDrive - Contoso'
 check 2 Glob path 'C:\Users\tester'
@@ -116,6 +143,20 @@ check 0 Bash command 'cat ~/.bashrc'
 check 0 Bash command 'echo find ~ -name x'
 check 0 Bash command 'git grep foo'
 check 0 Bash command 'find . -name x' 'C:\Users\tester\Documents\GitHub\proj'
+check 0 Bash command 'find src docs \( -name node_modules -o -name .next \) -prune -o -type f -print'
+check 0 Bash command 'find src \! -name x'
+check 0 Bash command 'find src -name x -exec ls {} \;'
+check 0 Bash command 'ls -R \(old\)'
+check 0 Bash command 'find "\(" -name a' 'C:\Users\tester'
+check 0 Bash command 'find /c/Users/tester/Dropbox\ \(Contoso\)-Archiv -name x'
+check 0 Bash command 'find "C:\\Users\\tester\\Documents\\GitHub\\proj\\" -name x'
+# In double quotes \" is a quote character, so this is a folder Dropbox (Contoso)" next to the root
+check 0 Bash command 'find "/c/Users/tester/Dropbox (Contoso)\"/x" -name a'
+# Unquoted, bash drops these backslashes: C:Userstester is no folder, the profile is not searched
+check 0 Bash command 'find C:\Users\tester\ -name x'
+check 0 Bash command $'grep -rn foo \\\nsrc/'
+check 0 Bash command $'find src docs \\\n  -name x'
+check 0 Bash command $'rg -n foo \\\n  src'
 check 0 Bash command 'find /c/Users/tester/Contoso-tools -name x'
 check 0 Bash command 'find "/c/Users/tester/Ölwerk-Archiv" -name a'
 check 0 Bash command 'find "/c/Users/tester/Ölwerk/Lib B" -name a'
@@ -136,6 +177,13 @@ long+="EOF"
 start=$SECONDS
 check 0 Bash command "$long"
 ((SECONDS - start < 10)) || { fail=$((fail + 1)); echo "FAIL a long command took $((SECONDS - start)) s"; }
+# So does one long quoted word full of backslashes, which is read character by character
+long='python -c "'
+for i in $(seq 1 600); do long+="print(\\\"line $i Ölwerk\\\\n\\\"); "; done
+long+='"; ls -R src'
+start=$SECONDS
+check 0 Bash command "$long"
+((SECONDS - start < 10)) || { fail=$((fail + 1)); echo "FAIL a long quoted word took $((SECONDS - start)) s"; }
 
 echo "$run cases, $fail failed"
 ((fail == 0))

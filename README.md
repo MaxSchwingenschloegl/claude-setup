@@ -364,7 +364,9 @@ newer Roslyn. `install.ps1` checks the plugin's start script, not the `csharp-ls
   broken, each of the three blocks every shell call with a message saying so, rather than letting
   commands through unchecked; restore the folder (`git checkout`, then `install.ps1`). Register
   each for the matcher `Bash|PowerShell` in your configuration's `settings.json`, like the two
-  above. The templates register the commit secret scan (both) and the git guard (`recommended`,
+  above. That matcher covers the Monitor tool too: Claude Code hands a Monitor call to every hook
+  matched on `Bash` as a Bash call with the same command (measured with Claude Code 2.1.321), so
+  the shell hooks need no `Monitor` matcher. The templates register the commit secret scan (both) and the git guard (`recommended`,
   which also turns attribution off). Neither registers the remote-access guard: refusing every
   server is a personal policy, so add it yourself if it is yours.
 - `statusline/statusline.sh` shows the account, the model, `⦿ remote` while Remote Control is
