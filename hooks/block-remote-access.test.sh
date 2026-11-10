@@ -28,6 +28,7 @@ check() {  # expected exit, tool, command
 check 2 Bash 'ssh deploy@build-01.example.net'
 check 2 Bash 'ssh -p 2222 -i ~/.ssh/id_ed25519 admin@10.0.0.5 "systemctl restart app"'
 check 2 Bash 'ssh build-01 uptime'
+check 2 Bash 'SSH_AUTH_SOCK=/tmp/agent ssh build-01 uptime; echo done'
 check 2 Bash 'ssh -T git@github.com ls'
 check 2 Bash 'ssh git@build-01 "rm -rf /srv/app"'
 check 2 Bash 'cd deploy && ssh build-01'

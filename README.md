@@ -326,7 +326,10 @@ newer Roslyn. `install.ps1` checks the plugin's start script, not the `csharp-ls
   iCloud), on macOS it guards `~/Library/CloudStorage`. For a client that registers nothing, list
   a part of the folder's name in `PROFILE_SEARCH_GUARD_EXTRA` (`;`-separated) in your own
   `settings.json` `env`. It reads the command text and the registry and opens no file in the
-  profile. Tests: `bash hooks/block-profile-wide-search.test.sh`.
+  profile. Like the hooks below, it looks only at the program at command position, also behind
+  `bash -c`, `cmd /c`, `powershell -c`, `xargs`, in backquotes and in `find -exec`; the text of a
+  here-document or a message is not a command, unless a shell reads it (`bash <<'EOF'`). Tests:
+  `bash hooks/block-profile-wide-search.test.sh`.
 - `hooks/guard-git.sh` is a PreToolUse hook for Bash and PowerShell that blocks git and gh
   commands the git rules forbid: AI attribution (Co-Authored-By naming Claude, Claude-Session,
   "Generated with Claude Code", a Claude author) in commit, merge, tag and note messages, pull
@@ -359,10 +362,11 @@ newer Roslyn. `install.ps1` checks the plugin's start script, not the `csharp-ls
   configuration are stricter where they say so: with `Bash(ssh *)` denied, `ssh -T
   git@github.com` is still refused by the settings, although the hook lets it through. Tests:
   `bash hooks/block-remote-access.test.sh`.
-- The three share `hooks/lib/command-segments.sh`, which splits a command line in time linear in
-  its length (a 60 KB command takes one to two seconds in Git Bash). If the library is missing or
-  broken, each of the three blocks every shell call with a message saying so, rather than letting
-  commands through unchecked; restore the folder (`git checkout`, then `install.ps1`). Register
+- The three and the search guard share `hooks/lib/command-segments.sh`, which splits a command
+  line in time linear in its length (a 60 KB command takes one to two seconds in Git Bash). If the
+  library is missing or broken, each of the four blocks every call it would check with a message
+  saying so, rather than letting commands through unchecked; restore the folder (`git checkout`,
+  then `install.ps1`). Register
   each for the matcher `Bash|PowerShell` in your configuration's `settings.json`, like the two
   above. That matcher covers the Monitor tool too: Claude Code hands a Monitor call to every hook
   matched on `Bash` as a Bash call with the same command (measured with Claude Code 2.1.321), so

@@ -1,4 +1,5 @@
-# Sourced by guard-git.sh, block-commit-secrets.sh and block-remote-access.sh; not a hook itself.
+# Sourced by guard-git.sh, block-commit-secrets.sh, block-remote-access.sh and
+# block-profile-wide-search.sh; not a hook itself.
 # Splits a shell command line into simple commands, so that a guard looks only at the program at
 # command position and its arguments. Text inside a quoted message or a here-document is never
 # taken for a command: a `gh issue comment` whose body mentions `git push origin main`, or a
@@ -13,6 +14,9 @@
 #   named for its program in CS_PROGRAMS (CS_PROGRAMS[git]=check_git), else CALLBACK when it is
 #   not empty, runs with
 #     words     its words, quotes removed and escapes kept (C:\x stays C:\x)
+#     seg_raw   the raw text of each word that had quotes or escapes, at the same index; unset for
+#               the others, whose raw text is the word (cs_unescape reads one as bash does)
+#     sh        the shell the command runs in: bash, powershell or cmd
 #     at        the index of the program: VAR=value assignments, keywords (if, then, do, !, {)
 #               and wrappers (env, sudo, command, exec, nohup, nice, time, timeout, stdbuf, watch,
 #               xargs) skipped
@@ -20,7 +24,11 @@
 #     heredocs  the bodies of the here-documents and here-strings in it
 #     stdin     the words and here-documents of the command piping into it, if one does
 #     CS_CWD    the directory it runs in: set by the hook from the payload's cwd, followed through
-#               every cd, pushd, chdir, Set-Location, sl and Push-Location before it
+#               every cd, pushd, chdir, Set-Location, sl and Push-Location before it, whose
+#               target in bash is read with its escapes (cd Team\ Files); cd - goes back to the
+#               folder before (CS_PREV), popd and Pop-Location to the one pushd left
+#               (CS_STACK), and either stays put when that is not known; cmd's cd /d X goes to X
+#   command -v and -V run nothing, so no handler sees the program they name.
 #   A wrapper whose argument is a command line (bash/sh -c, cmd /c, powershell/pwsh -c or a bare
 #   command, wsl, watch "...") is unwrapped one level: CALLBACK sees the commands inside, not the
 #   wrapper; so is the command of find -exec/-execdir/-ok/-okdir.
@@ -34,6 +42,8 @@
 nl=$'\n'
 tab=$'\t'
 declare -A CS_PROGRAMS=()
+CS_PREV=
+CS_STACK=()
 
 # input: the hook's payload from stdin. read takes a pipe byte by byte (200 ms for 60 KB), cat
 # costs a process (40 ms): read takes the first 4 KB, cat the rest of a larger payload. In bytes:
@@ -68,14 +78,56 @@ field() {
 
 # REPLY: path $2 seen from directory $1, with forward slashes; ~ and the profile variables expanded
 resolve_path() {
-    local p=${2//\\//} pre
-    for pre in '$USERPROFILE' '${USERPROFILE}' '$env:USERPROFILE' '${env:USERPROFILE}' '%USERPROFILE%' '$HOME' '${HOME}' '$env:HOME' '~'; do
-        if [[ $p == "$pre" || $p == "$pre"/* ]]; then
+    local p=${2//\\//} pre lp
+    lp=${p,,}
+    # Without case, as PowerShell and cmd read them ($Env:USERPROFILE, %UserProfile%, $Home)
+    for pre in '$userprofile' '${userprofile}' '$env:userprofile' '${env:userprofile}' '%userprofile%' '$home' '${home}' '$env:home' '~'; do
+        if [[ $lp == "$pre" || $lp == "$pre"/* ]]; then
             p=${HOME//\\//}${p:${#pre}}
             break
         fi
     done
     if [[ $p == /* || $p =~ ^[A-Za-z]: ]]; then REPLY=$p; else REPLY=${1%/}/$p; fi
+}
+
+# REPLY: the raw bash word $1 (from seg_raw) with its quotes removed and each escape read as bash
+# reads it. Outside quotes a shell character, space, backslash or quote after \ is that character
+# (`\(`, `Team\ Files`); before anything else the backslash stays, so C:\Users stays a path. In
+# double quotes \ before \ " $ or ` is that character. It jumps from one \ ' " to the next, as one
+# character at a time costs seconds on a long quoted word in Git Bash.
+cs_unescape() {
+    local s=$1 out= head nx
+    while [[ -n $s ]]; do
+        head=${s%%[\\\'\"]*}
+        out+=$head
+        s=${s:${#head}}
+        case ${s:0:1} in
+            "'")
+                s=${s:1}
+                head=${s%%\'*}
+                out+=$head
+                s=${s:${#head}+1} ;;
+            '"')
+                s=${s:1}
+                while [[ -n $s ]]; do
+                    head=${s%%[\\\"]*}
+                    out+=$head
+                    s=${s:${#head}}
+                    [[ -z $s ]] && break
+                    [[ ${s:0:1} == '"' ]] && { s=${s:1}; break; }
+                    nx=${s:1:1}
+                    [[ -n $nx && '\"$`' == *"$nx"* ]] || out+='\'
+                    out+=$nx
+                    s=${s:2}
+                done ;;
+            '\')
+                nx=${s:1:1}
+                [[ -n $nx && " ()|&;<>!\\'\"" == *"$nx"* ]] || out+='\'
+                out+=$nx
+                s=${s:2} ;;
+        esac
+    done
+    REPLY=$out
 }
 
 # REPLY: an absolute path from resolve_path in one spelling, for comparing: C:/X and /c/x both
@@ -253,7 +305,8 @@ _cs_plain() {
         r=${r#"${r%%[!$' \t\r']*}"}
         first=${r%%[$' \t\r;|&()'$nl]*}
         r=${r:${#first}}
-        skip=0
+        # Only blanks: the target is the quoted or escaped word after them (> "out.txt")
+        [[ -n $first || -n $r ]] && skip=0
     fi
     if [[ $r == *[\;\|\&\(\)$nl]* ]]; then
         # && and || end a command without piping into the next, as ; does
@@ -278,11 +331,12 @@ _cs_plain() {
                     # Only a command some handler or the dispatch itself cares about is dispatched
                     p=${words[0],,}
                     case $p in
+                        *=*) ;;   # an assignment, whose value may hold a / (TMPDIR=/tmp/x)
                         */* | *\\* | *.exe) p=${p##*[/\\]}; p=${p%.exe} ;;
                     esac
                     case $p in
-                        *=* | env | sudo | command | builtin | exec | nohup | nice | time | timeout | stdbuf | watch | xargs | if | then | else | elif | do | while | until | '!' | '{' | '}' | \
-                        cd | pushd | chdir | set-location | sl | push-location | find | bash | sh | zsh | dash | ksh | cmd | powershell | pwsh | wsl)
+                        *=* | '$'* | env | sudo | command | builtin | exec | nohup | nice | time | timeout | stdbuf | watch | xargs | if | then | else | elif | do | while | until | '!' | '{' | '}' | \
+                        cd | pushd | popd | chdir | set-location | sl | push-location | pop-location | find | bash | sh | zsh | dash | ksh | cmd | powershell | pwsh | wsl)
                             IFS=' '
                             _cs_dispatch
                             IFS=$'\x1e' ;;
@@ -332,6 +386,18 @@ _cs_raw_from() {
     REPLY=${REPLY% }
 }
 
+# REPLY: the command line that cmd /c or powershell -c gets from the words from index $1 on. A
+# single quoted or escaped argument in bash is read as bash reads it (cmd //c "find /c \"x\""),
+# else the raw words are joined and one pair of enclosing quotes goes.
+_cs_inner() {
+    if [[ $sh == bash && $1 -eq $((n - 1)) && -n ${seg_raw[$1]+x} ]]; then
+        cs_unescape "${seg_raw[$1]}"
+    else
+        _cs_raw_from "$1"
+        _cs_unquote "$REPLY"
+    fi
+}
+
 split_command() {  # text shell callback [depth]
     local sh=$2 cb=$3 depth=${4:-0}
     local -a HD=() words=() seg_raw=() heredocs=()
@@ -348,7 +414,10 @@ split_command() {  # text shell callback [depth]
             plain='[^][:space:]"^;|&()<>]|[][]'; esc='\^.'; dq='"[^"]*"'
             re_sep="^(&&|\\|\\||;|\\||&|\\(|\\)|$nl)" ;;
         *)
-            text=${text//\\$nl/ }
+            # A backslash ending a line joins the lines, also inside a word (~/One\<newline>Drive).
+            # shortcut: an escaped backslash at a line's end (echo a\\) joins too, which bash
+            # does not do; count the backslashes before the line break if that shows up in use.
+            text=${text//\\$nl/}
             plain='[^][:space:]'"'"'"`;|&()<>\]|[][]'; esc='\\.'; dq='"([^"\\]|\\.)*"'
             re_sep="^(&&|\\|\\||\\|&|;;|;|\\||&|\\(|\\)|\`|$nl)" ;;
     esac
@@ -446,23 +515,45 @@ _cs_sub() {
     _cs_dispatch
 }
 
+# Splits text $1 as shell $2 for a child process (bash -c, cmd /c, powershell -c, wsl, watch): a
+# cd, pushd or popd inside it ends with it
+_cs_child() {
+    local CS_CWD=$CS_CWD CS_PREV=$CS_PREV
+    local -a CS_STACK=("${CS_STACK[@]}")
+    split_command "$1" "$2" "$cb" 1
+}
+
 _cs_dispatch() {
-    local stdin=$stdin_text at=0 n=${#words[@]} j k prog target inner watched=0 handler
+    local stdin=$stdin_text at=0 n=${#words[@]} j k prog target inner watched=0 handler wrapper
     # Assignments, keywords and wrappers in front of the program; most commands have none
     prog=${words[0],,}
     case $prog in
-        *=* | env | sudo | command | builtin | exec | nohup | nice | time | timeout | stdbuf | watch | xargs | if | then | else | elif | do | while | until | '!' | '{' | '}')
+        *=* | '$'* | env | sudo | command | builtin | exec | nohup | nice | time | timeout | stdbuf | watch | xargs | if | then | else | elif | do | while | until | '!' | '{' | '}')
             while ((at < n)); do
                 if [[ ${words[at]} =~ ^[A-Za-z_][A-Za-z0-9_]*= ]]; then
                     ((at++))
                     continue
                 fi
+                # A PowerShell assignment of a command's output: $files = Get-ChildItem ...; one
+                # to $env: sets the environment, which a handler may read ($env:DOCKER_HOST = ...)
+                if [[ $sh == powershell && ${words[at]} == '$'* && ${words[at],,} != '$env:'* && ${words[at+1]} =~ ^[-+*/]?=$ ]]; then
+                    ((at += 2))
+                    continue
+                fi
                 case ${words[at],,} in
                     env | sudo | command | builtin | exec | nohup | nice | time | timeout | stdbuf | watch)
-                        [[ ${words[at],,} == watch ]] && watched=1
+                        wrapper=${words[at],,}
+                        # command -v and -V look a program up and run nothing
+                        [[ $wrapper == command && ${words[at+1]} =~ ^-p?[vV] ]] && return 0
+                        [[ $wrapper == watch ]] && watched=1
                         ((at++))
                         while ((at < n)) && [[ ${words[at]} == -* || ${words[at]} =~ ^[0-9.]+[smhd]?$ ]]; do
-                            [[ $watched == 1 && (${words[at]} == -n || ${words[at]} == --interval) ]] && ((at++))
+                            # Options with a value (timeout -s KILL, sudo -u x, watch -n 2)
+                            case $wrapper:${words[at]} in
+                                watch:-n | watch:--interval | timeout:-s | timeout:--signal | timeout:-k | timeout:--kill-after | \
+                                sudo:-u | sudo:--user | sudo:-g | sudo:--group | sudo:-h | sudo:--host | sudo:-p | sudo:--prompt | sudo:-C | sudo:-D | sudo:--chdir | \
+                                env:-u | env:--unset | env:-C | env:--chdir) ((at++)) ;;
+                            esac
                             ((at++))
                         done ;;
                     xargs)
@@ -479,26 +570,51 @@ _cs_dispatch() {
     ((at < n)) || return 0
     if ((watched && depth == 0)) && [[ ${words[at]} == *' '* ]]; then
         # watch "ssh host": watch hands its text to sh -c
-        split_command "${words[*]:at}" bash "$cb" 1
+        _cs_child "${words[*]:at}" bash
         return 0
     fi
     ((at)) && prog=${words[at],,}
     prog=${prog##*[/\\]}
     prog=${prog%.exe}
     case $prog in
+        popd | pop-location)
+            # Back to the folder the matching pushd left, which is unknown before the first one
+            if ((${#CS_STACK[@]})); then
+                CS_CWD=${CS_STACK[-1]}
+                unset 'CS_STACK[-1]'
+            fi
+            return 0 ;;
         cd | pushd | chdir | set-location | sl | push-location)
             target=
             for ((j = at + 1; j < n; j++)); do
                 case ${words[j],,} in
                     -path | -literalpath) target=${words[j+1]}; break ;;
+                    -) target=-; break ;;
+                    /d) [[ $sh == cmd ]] && continue; target=${words[j]}; break ;;   # cmd's cd /d X
                     -*) ;;
-                    *) target=${words[j]}; break ;;
+                    *)
+                        target=${words[j]}
+                        if [[ $sh == bash && -n ${seg_raw[j]+x} ]]; then
+                            cs_unescape "${seg_raw[j]}"
+                            target=$REPLY
+                        fi
+                        break ;;
                 esac
             done
-            if [[ -n $target ]]; then
+            if [[ $target == - ]]; then
+                # Back to the folder before, which is unknown before the first cd of the command
+                if [[ -n $CS_PREV ]]; then
+                    target=$CS_PREV
+                    CS_PREV=$CS_CWD
+                    CS_CWD=$target
+                fi
+            elif [[ -n $target ]]; then
+                [[ $prog == pushd || $prog == push-location ]] && CS_STACK+=("$CS_CWD")
+                CS_PREV=$CS_CWD
                 resolve_path "$CS_CWD" "$target"
                 CS_CWD=$REPLY
             elif [[ $prog == cd && $sh == bash ]]; then
+                CS_PREV=$CS_CWD
                 CS_CWD=${HOME//\\//}
             fi
             return 0 ;;
@@ -519,8 +635,12 @@ _cs_dispatch() {
             bash | sh | zsh | dash | ksh)
                 for ((j = at + 1; j < n; j++)); do
                     if [[ ${words[j]} =~ ^-[a-z]*c[a-z]*$ ]]; then
-                        _cs_unquote "${seg_raw[j+1]-${words[j+1]}}"
-                        split_command "$REPLY" bash "$cb" 1
+                        if [[ $sh == bash && -n ${seg_raw[j+1]+x} ]]; then
+                            cs_unescape "${seg_raw[j+1]}"
+                        else
+                            _cs_unquote "${seg_raw[j+1]-${words[j+1]}}"
+                        fi
+                        _cs_child "$REPLY" bash
                         return 0
                     fi
                     [[ ${words[j]} == -* ]] || break
@@ -529,9 +649,8 @@ _cs_dispatch() {
                 for ((j = at + 1; j < n; j++)); do
                     case ${words[j],,} in
                         /c | //c | /k | //k)
-                            _cs_raw_from $((j + 1))
-                            _cs_unquote "$REPLY"
-                            split_command "$REPLY" cmd "$cb" 1
+                            _cs_inner $((j + 1))
+                            _cs_child "$REPLY" cmd
                             return 0 ;;
                         /*) ;;
                         *) break ;;
@@ -541,17 +660,15 @@ _cs_dispatch() {
                 for ((j = at + 1; j < n; j++)); do
                     case ${words[j],,} in
                         -c | -co | -com | -comm | -comma | -comman | -command)
-                            _cs_raw_from $((j + 1))
-                            _cs_unquote "$REPLY"
-                            split_command "$REPLY" powershell "$cb" 1
+                            _cs_inner $((j + 1))
+                            _cs_child "$REPLY" powershell
                             return 0 ;;
                         -f | -fi | -fil | -file | -e | -ec | -en* | -encodedcommand) break ;;
                         -executionpolicy | -ex | -ep | -windowstyle | -w | -workingdirectory | -wd | -configurationname | -outputformat | -o | -of | -inputformat | -if | -settingsfile | -version | -v) ((j++)) ;;
                         -*) ;;
                         *)
-                            _cs_raw_from $j
-                            _cs_unquote "$REPLY"
-                            split_command "$REPLY" powershell "$cb" 1
+                            _cs_inner $j
+                            _cs_child "$REPLY" powershell
                             return 0 ;;
                     esac
                 done ;;
@@ -560,13 +677,13 @@ _cs_dispatch() {
                     case ${words[j],,} in
                         -e | --exec | --)
                             _cs_raw_from $((j + 1))
-                            split_command "$REPLY" bash "$cb" 1
+                            _cs_child "$REPLY" bash
                             return 0 ;;
                         -d | --distribution | -u | --user | --cd) ((j++)) ;;
                         -*) ;;
                         *)
                             _cs_raw_from $j
-                            split_command "$REPLY" bash "$cb" 1
+                            _cs_child "$REPLY" bash
                             return 0 ;;
                     esac
                 done ;;

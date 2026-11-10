@@ -53,6 +53,8 @@ check 2 Bash command 'find / -name x'
 check 2 Bash command 'timeout 60 find ~ -name x'
 check 2 Bash command 'LC_ALL=C find ~ -name x'
 check 2 Bash command 'echo start && find ~ -name x | head'
+check 2 Bash command $'echo start\nfind ~ -name x'
+check 2 PowerShell command $'Write-Output start\ngci ~ -r'
 check 2 Bash command 'cd ~ && find . -name x'
 check 2 Bash command 'cd /c/Users/tester; grep -rn foo'
 check 2 Bash command 'cd; rg foo'
@@ -116,6 +118,66 @@ check 2 Bash command $'find \\\n~ -name x'
 check 2 Bash command $'echo a \\\n && find ~ -name x'
 check 2 PowerShell command 'Get-ChildItem C:\ -Recurse'
 check 2 PowerShell command 'gci -r C:\Users\tester\| Measure-Object'
+# A cd into a synced folder reads its escapes as bash does, like the search after it
+check 2 Bash command 'cd /d/Sync/Team\ Files && find . -name a'
+check 2 Bash command 'cd ~/Dropbox\ \(Contoso\) && rg foo'
+check 2 Bash command 'cd ~ && cd src && cd - && find . -name x'
+# The command a wrapper or another shell runs is read, and so is one in backquotes or $( )
+check 2 Bash command 'nohup find ~ -name x &'
+check 2 Bash command 'bash -c "find ~ -name x"'
+check 2 Bash command "sh -c 'grep -rn foo ~'"
+check 2 Bash command 'powershell -c "gci ~ -r"'
+check 2 Bash command 'echo `find ~ -name x`'
+check 2 Bash command 'n=$(find ~ -name x | wc -l)'
+check 2 Bash command 'find src -name x -exec grep -rn foo ~ \;'
+check 2 Bash command 'grep -rn foo ~ 2>/dev/null'
+check 2 Bash command $'bash <<\'EOF\'\nfind ~ -name x\nEOF'
+check 2 PowerShell command 'cmd /c dir /s C:\Users\tester'
+check 2 Bash command $'bash <<\'EOF\'\nbash -c \'find ~ -name x\'\nEOF'
+# The argument of bash -c, cmd /c and powershell -c is read with bash's escapes first
+check 2 Bash command 'bash -c "find \"/c/Users/tester\" -name x"'
+check 2 Bash command 'powershell -Command "Get-ChildItem -Path \$env:USERPROFILE -Recurse -Filter *.log"'
+check 2 Bash command 'cmd //c dir /s /b' 'C:\Users\tester'
+# A redirection's target is no path to search, however it is quoted; an assignment before the
+# program is no program, whatever its value holds
+check 2 Bash command 'rg TODO > "todo.txt"' 'C:\Users\tester'
+check 2 Bash command 'cd ~ && tree > "$TEMP/tree.txt"'
+check 2 PowerShell command 'cd ~; Get-ChildItem -Recurse > "list.txt"'
+check 2 Bash command 'TMPDIR=/tmp/x find ~ -name x | head'
+check 2 Bash command 'RIPGREP_CONFIG_PATH="/c/x" rg foo ~ | head'
+# A backslash ending a line joins the word around it, as bash reads it
+check 2 Bash command $'find ~/One\\\nDrive -name x'
+# Options as each tool reads them: case matters outside PowerShell
+check 2 Bash command 'ls -1R ~'
+check 2 Bash command 'grep -F -r foo ~'
+check 2 Bash command 'find -- ~ -name x'
+check 2 PowerShell command 'ls -r ~'
+check 2 PowerShell command 'Get-ChildItem ~ -recurse'
+check 2 Bash command 'pushd ~ && pushd src && popd && rg foo'
+# PowerShell variables and cmd's %VAR% have no case
+check 2 PowerShell command 'Get-ChildItem $Env:USERPROFILE -Recurse'
+check 2 PowerShell command 'gci $env:userprofile -r'
+check 2 PowerShell command 'Get-ChildItem $Home -Recurse'
+check 2 PowerShell command 'cd $Home; gci -r'
+check 2 Bash command 'cmd //c dir /s /b %UserProfile%'
+# Each tool's own options: a flag of one is an option with a value in another
+check 2 Bash command 'tree -a -d ~'
+check 2 Bash command 'tree -d ~'
+check 2 Bash command 'du -m ~'
+check 2 Bash command 'ls -A -R ~'
+check 2 Bash command 'grep -r -T foo ~'
+check 2 Bash command "fd -g '*.pdf' ~"
+check 2 Bash command 'ag -t foo ~'
+check 2 Bash command 'ack -f ~'
+check 2 Bash command 'ag -g foo ~'
+check 2 Bash command 'env -u FOO find ~ -name x'
+check 2 PowerShell command 'gci ~ -s -Filter *.pdf'
+check 2 PowerShell command 'gci -re ~'
+check 2 PowerShell command '$files = gci $HOME -r'
+check 2 Bash command 'cmd //c "dir /b/s %USERPROFILE%"'
+check 2 Bash command 'timeout -s KILL 10 find ~ -name x'
+check 2 Bash command 'sudo -u x find ~ -name x'
+check 2 Glob pattern 'C:/Users/tester/**/*.pdf'
 check 2 Grep path 'C:\Users\tester'
 check 2 Grep path '/c/Users/tester/OneDrive - Contoso'
 check 2 Glob path 'C:\Users\tester'
@@ -157,6 +219,37 @@ check 0 Bash command 'find C:\Users\tester\ -name x'
 check 0 Bash command $'grep -rn foo \\\nsrc/'
 check 0 Bash command $'find src docs \\\n  -name x'
 check 0 Bash command $'rg -n foo \\\n  src'
+# The text of a here-document is not run, unless a shell reads it
+check 0 Bash command $'git commit -F - <<\'EOF\'\ngrep -rn foo ~ is blocked now\nEOF'
+check 0 Bash command $'cat > notes.md <<\'EOF\'\nfind ~ -name x lists every file\nEOF'
+check 0 Bash command 'echo done # find ~ -name x'
+check 0 Bash command 'cd /d/Sync/Team\ Files-Old && find . -name a'
+# cd - goes back to the folder before, which is unknown at the start of the command
+check 0 Bash command 'cd - && find . -name x'
+check 0 Bash command 'cd ~/Documents/GitHub/other && cd - && find . -name x'
+check 0 PowerShell command 'Push-Location ~; Get-ChildItem; Pop-Location; Get-ChildItem -Recurse'
+check 0 Bash command 'rg TODO src > "C:\Users\tester\OneDrive - Contoso\todo.txt"'
+check 0 Bash command 'command -v find' 'C:\Users\tester'
+check 0 Bash command 'command -v rg >/dev/null && rg foo src' 'C:\Users\tester'
+check 0 Bash command 'rg --version' 'C:\Users\tester'
+check 0 Bash command 'ls -ltr ~'
+check 0 Bash command 'ls -r ~'
+# In cmd and PowerShell, find is the Windows FIND, which searches text and not folders
+check 0 Bash command 'cmd //c "netstat -an | find /c \"LISTENING\""'
+check 0 PowerShell command 'netstat -an | find /c "LISTENING"'
+check 0 Bash command 'powershell -Command "Get-ChildItem -Path \".\" -Recurse -Filter *.json"'
+check 0 Bash command 'cmd //c "cd /d C:\Users\tester\Documents\GitHub\proj && dir /s"' 'C:\Users\tester'
+check 0 Bash command 'fd -e md . .claude' 'C:\Users\tester'
+check 0 Bash command "fd -g '*.md' src" 'C:\Users\tester'
+check 0 Bash command "tree -P '*.md' src" 'C:\Users\tester'
+check 0 Bash command "tree -I '*.log' src" 'C:\Users\tester'
+check 0 PowerShell command 'gci -r -inc *.md -path .\Documents' 'C:\Users\tester'
+# A cd in a child shell ends with it; a here-document a script reads is its input
+check 0 Bash command 'bash -c "cd ~" && rg foo'
+check 0 Bash command "bash -c 'pushd ~' ; rg foo"
+check 0 Bash command $'bash <<\'EOF\'\ncd ~\nEOF\nrg foo'
+check 0 Bash command $'bash script.sh <<\'EOF\'\nfind ~ -name x\nEOF'
+check 0 Glob pattern 'src/**/*.ts'
 check 0 Bash command 'find /c/Users/tester/Contoso-tools -name x'
 check 0 Bash command 'find "/c/Users/tester/Ölwerk-Archiv" -name a'
 check 0 Bash command 'find "/c/Users/tester/Ölwerk/Lib B" -name a'
@@ -170,20 +263,53 @@ check 0 Grep path ''
 check 0 Glob path 'C:\Users\tester\Documents\GitHub\proj\src'
 check 0 Read file_path 'C:\Users\tester\OneDrive - Contoso\a.txt'
 
-# A long command with a recursive tool in it still answers well inside the hook's timeout
-long="python - <<'EOF'"$'\n'
-for i in $(seq 1 400); do long+="print('grep -rn something in line $i of a long patch script, find nothing')"$'\n'; done
-long+="EOF"
-start=$SECONDS
-check 0 Bash command "$long"
-((SECONDS - start < 10)) || { fail=$((fail + 1)); echo "FAIL a long command took $((SECONDS - start)) s"; }
-# So does one long quoted word full of backslashes, which is read character by character
-long='python -c "'
-for i in $(seq 1 600); do long+="print(\\\"line $i Ölwerk\\\\n\\\"); "; done
-long+='"; ls -R src'
-start=$SECONDS
-check 0 Bash command "$long"
-((SECONDS - start < 10)) || { fail=$((fail + 1)); echo "FAIL a long quoted word took $((SECONDS - start)) s"; }
+# A broken install blocks, so the gap shows, instead of letting every search through unchecked
+tmp=$(mktemp -d)
+trap 'rm -f "$reg_output"; rm -rf "$tmp"' EXIT
+cp "$hook" "$tmp/block-profile-wide-search.sh"
+saved=$hook
+hook=$tmp/block-profile-wide-search.sh
+check 2 Bash command 'find . -name x'
+hook=$saved
+
+# Large commands stay well inside the timeout: a hook that times out lets the command run unchecked.
+# The limit catches a return of the old quadratic tokenizer (30 s at 28 KB), with room for a busy
+# machine.
+timed() {  # name, limit in ms, expected exit, command: the hook process alone is timed
+    local name=$1 limit=$2 value=$4 start ms got
+    value=${value//\\/\\\\}
+    value=${value//\"/\\\"}
+    value=${value//$'\n'/\\n}
+    printf '%s' "{\"session_id\":\"t\",\"cwd\":\"C:\\\\Users\\\\tester\\\\proj\",\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$value\"}}" > "$tmp/payload.json"
+    start=$(date +%s%N)
+    bash "$hook" < "$tmp/payload.json" > /dev/null 2>&1
+    got=$?
+    ms=$((($(date +%s%N) - start) / 1000000))
+    run=$((run + 1))
+    echo "timing: $name: $ms ms, exit $got"
+    if [[ $got != "$3" ]] || ((ms >= limit)); then
+        fail=$((fail + 1))
+        echo "FAIL $name: expected exit $3 within $limit ms"
+    fi
+}
+heredoc="python - <<'EOF'"$'\n'
+for i in $(seq 1 400); do heredoc+="print('grep -rn something in line $i of a long patch script, find nothing')"$'\n'; done
+heredoc+="EOF"
+# One long quoted word full of backslashes
+quoted='python -c "'
+for i in $(seq 1 600); do quoted+="print(\\\"line $i Ölwerk\\\\n\\\"); "; done
+quoted+='"; ls -R src'
+# Many short commands, each a listing the hook has to look at
+script=""
+i=0
+while ((${#script} < 30000)); do
+    i=$((i + 1))
+    script+="echo line $i with a few short words a b c d e f g; ls -la src/dir$i"$'\n'
+done
+timed "here-document of ${#heredoc} bytes" 5000 0 "$heredoc"
+timed "quoted word of ${#quoted} bytes" 5000 0 "$quoted"
+timed "script of ${#script} bytes" 5000 0 "$script"
+timed "the same with a profile search at its end" 5000 2 "${script}find ~ -name x"
 
 echo "$run cases, $fail failed"
 ((fail == 0))
