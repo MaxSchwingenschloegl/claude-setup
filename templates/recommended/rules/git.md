@@ -28,6 +28,14 @@ require AI attribution: then follow them and tell me that you did.
   because `main` moved, stop and tell me: never force, never merge `main` into the branch, rebase
   only a branch that was never pushed, then show the new diff and ask again. Afterwards bring the
   local `main` up to date (`git merge --ff-only origin/main`) before the next branch.
+- With pull requests, a pushed branch that is behind `main`, conflicts with it, or sat on a
+  stacked pull request that has merged takes `main` in by a merge: `git merge origin/main` (or
+  `gh pr update-branch`, the same on GitHub's side), resolve, push normally, and squash-merge
+  that pull request, unless the repository names another merge method, so the merge commit does
+  not reach `main`. The pull request and its review stay where they are.
+- Never rewrite a pushed branch: no force push in any form (`-f`, `--force`,
+  `--force-with-lease`, a `+` refspec), no `gh pr update-branch --rebase`, no rebase after the
+  first push. A branch that was never pushed may be rebased.
 
 ## Safe changes
 - Stage by path, never `git add -A` or `git add .`, and run `git diff <path>` before staging it:

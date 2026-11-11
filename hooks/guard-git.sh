@@ -28,7 +28,9 @@
 #   <value>`, --unset, --add, --replace-all, `git config set|unset`, --remove-section core.
 #   Reading it (`git config core.hooksPath`, --get) stays allowed.
 # - Rewriting the remote: `git push` with --force, -f (also in -fu), --force-with-lease[=...],
-#   --mirror, a +refspec, or deleting main (`:main`, --delete/-d main).
+#   --mirror, a +refspec, or deleting main (`:main`, --delete/-d main); `gh pr update-branch
+#   --rebase` and the GraphQL updatePullRequestBranch with updateMethod REBASE, which rebase the
+#   pushed branch on GitHub's side. Plain `gh pr update-branch` merges main in and stays allowed.
 # Asked: `git push` whose refspec reaches main (main, HEAD:main, x:main, refs/heads/main),
 # `gh pr merge`, and `gh api` calls that merge a pull request (.../pulls/<n>/merge,
 # mergePullRequest). A block anywhere in the command wins over the question.
@@ -40,12 +42,16 @@
 # restored, so a broken install shows instead of letting every command through unchecked.
 #
 # Not covered: a message taken from an existing commit (-c, -C, --reuse-message, --fixup), from a
-# command substitution ($(cat msg.txt)) or from a file the hook cannot find; a plain `git push`
+# command substitution ($(cat msg.txt)) or from a file the hook cannot find; a GraphQL query read
+# from a file (`gh api graphql -F query=@q.graphql`, `--input q.json`) and a REBASE variable in
+# JSON that is a quoted word or piped in (`echo '{...}' | gh api graphql --input -`); a plain `git push`
 # whose upstream is main; abbreviated long options other than --no-veri/--no-verif; a commit made
 # through the GitHub MCP tools; aliases, scripts, variables. It is a guard against accidents, not
 # against a determined attacker.
 # Blocked although harmless: a commit message, pull request or issue text that quotes an
-# attribution line (a text about this hook, say); `git add -A --dry-run`. Rephrase, or ask the user.
+# attribution line (a text about this hook, say); `git add -A --dry-run`; a gh api call naming
+# updatePullRequestBranch that passes another value starting with "rebase" (`-f b='Rebase ...'`).
+# Rephrase, or ask the user.
 # Tests: hooks/guard-git.test.sh
 
 here=${BASH_SOURCE[0]%/*}
@@ -134,6 +140,10 @@ bulk_add() {
 
 force_push() {
     block "\`git push $1\` rewrites or deletes history on the remote. Only the user does that; push a new commit instead, or ask the user."
+}
+
+rebase_branch() {
+    block "updating a pull request by rebase rewrites its pushed branch. Take main in by a merge instead: \`gh pr update-branch\` without --rebase, or \`git merge origin/main\` and a normal push."
 }
 
 # True when ref $1 names the branch main
@@ -339,15 +349,26 @@ check_gh() {
             segment_text
             with_files "$CS_CWD" "${files[@]}"
             attributes_ai "$REPLY" && block "$attribution_reason"
-            [[ $area == pr && $verb == merge ]] && ask "Merging a pull request is the user's decision: gh pr merge." ;;
+            [[ $area == pr && $verb == merge ]] && ask "Merging a pull request is the user's decision: gh pr merge."
+            if [[ $area == pr && $verb == update-branch ]]; then
+                for ((i = at + 1; i < n; i++)); do
+                    a=${words[i],,}
+                    [[ $a == -- ]] && break
+                    # a boolean flag: --rebase=false and its spellings leave the merge
+                    [[ $a == --rebase || ($a == --rebase=* && ! $a =~ ^--rebase=(false|f|0)$) ]] && rebase_branch
+                done
+            fi ;;
         api)
-            for ((i = at + 1; i < n; i++)); do
-                a=${words[i],,}
-                if [[ $a =~ pulls/[0-9]+/merge || $a == *mergepullrequest* ]]; then
-                    ask "Merging a pull request is the user's decision: gh api ... merge."
-                    break
-                fi
-            done ;;
+            # The query may come from a word, a here-document (-f query="$(cat <<'EOF' ...)") or
+            # stdin (--input -), and REBASE from the query, a variable (-F m=REBASE, a default
+            # `$m: ... = REBASE`) or the JSON of a here-document
+            segment_text
+            local t=${REPLY,,}
+            local method='(updatemethod[[:space:]]*:[[:space:]]*|=[[:space:]]*|"[[:space:]]*:[[:space:]]*")rebase([^[:alnum:]_]|$)'
+            [[ $t == *updatepullrequestbranch* && $t =~ $method ]] && rebase_branch
+            if [[ $t =~ pulls/[0-9]+/merge || $t == *mergepullrequest* ]]; then
+                ask "Merging a pull request is the user's decision: gh api ... merge."
+            fi ;;
     esac
 }
 

@@ -184,6 +184,27 @@ check 2 Bash 'git push origin --delete main'
 check 2 Bash 'git push -d origin main'
 check 2 Bash 'git status && git push --force'
 check 2 PowerShell 'git push --force-with-lease origin feature'
+# Blocked: updating a pull request by rebase, which rewrites its pushed branch on GitHub's side
+check 2 Bash 'gh pr update-branch 12 --rebase'
+check 2 Bash 'gh pr update-branch --rebase'
+check 2 Bash 'gh -R owner/repo pr update-branch 12 --rebase=true'
+check 2 Bash 'git fetch && gh pr update-branch feature --rebase'
+check 2 PowerShell 'gh pr update-branch 12 --rebase'
+check 2 Bash "gh api graphql -f query='mutation { updatePullRequestBranch(input: {pullRequestId: \"x\", updateMethod: REBASE}) { clientMutationId } }'"
+check 2 Bash "gh api graphql -f query='mutation(\$m: PullRequestBranchUpdateMethod) { updatePullRequestBranch(input: {pullRequestId: \"x\", updateMethod: \$m}) { clientMutationId } }' -F m=REBASE"
+check 2 Bash "gh api graphql -f query='mutation(\$m: PullRequestBranchUpdateMethod = REBASE) { updatePullRequestBranch(input: {pullRequestId: \"x\", updateMethod: \$m}) { clientMutationId } }'"
+check 2 Bash "gh api graphql -f query=\"\$(cat <<'EOF'
+mutation {
+  updatePullRequestBranch(input: {pullRequestId: \"x\", updateMethod: REBASE}) { clientMutationId }
+}
+EOF
+)\""
+check 2 Bash "gh api graphql --input - <<'EOF'
+{\"query\": \"mutation(\$id: ID!, \$m: PullRequestBranchUpdateMethod) { updatePullRequestBranch(input: {pullRequestId: \$id, updateMethod: \$m}) { clientMutationId } }\", \"variables\": {\"id\": \"x\", \"m\": \"REBASE\"}}
+EOF"
+check 2 PowerShell "gh api graphql -f query=@'
+mutation { updatePullRequestBranch(input: {pullRequestId: \"x\", updateMethod: REBASE}) { clientMutationId } }
+'@"
 # Ask: a push to main and the merge of a pull request go to the user
 check ask Bash 'git push origin main'
 check ask Bash 'git -C sub push origin main'
@@ -193,7 +214,14 @@ check ask Bash 'git push -u origin main'
 check ask Bash 'gh pr merge 12 --squash'
 check ask Bash 'gh pr merge --merge --delete-branch'
 check ask Bash 'gh api -X PUT repos/owner/repo/pulls/12/merge'
+check ask Bash 'gh api -X PUT repos/owner/repo/pulls/12/merge -f merge_method=rebase'
 check ask Bash "gh api graphql -f query='mutation { mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId } }'"
+check ask Bash "gh api graphql -f query=\"\$(cat <<'EOF'
+mutation {
+  mergePullRequest(input: {pullRequestId: \"x\"}) { clientMutationId }
+}
+EOF
+)\""
 check ask PowerShell 'git push origin main'
 # The refspec never goes into the JSON reason: a backslash or tab in it would make the JSON invalid
 check ask PowerShell "git push origin 'feat\x:main'"
@@ -232,6 +260,17 @@ check 0 Bash 'git push origin --delete old-feature'
 check 0 Bash 'git push origin :old-feature'
 check 0 Bash 'git push'
 check 0 Bash 'gh pr view 12'
+check 0 Bash 'gh pr update-branch 12'
+check 0 Bash 'gh pr update-branch 12 --rebase=false'
+check 0 Bash 'gh pr update-branch 12 --rebase=False'
+check 0 Bash 'gh pr update-branch 12 --rebase=0'
+check 0 Bash "gh api graphql -f query='mutation { updatePullRequestBranch(input: {pullRequestId: \"x\"}) { pullRequest { canBeRebased } } }'"
+check 0 Bash "gh api graphql -f query='mutation { updatePullRequestBranch(input: {pullRequestId: \"x\", updateMethod: MERGE}) { clientMutationId } }' -F note=rebased"
+check 0 Bash 'gh pr update-branch 12 -- --rebase'
+check 0 Bash 'gh api repos/owner/repo/pulls/12 --jq .rebaseable'
+check ask Bash 'gh pr merge 12 --rebase'
+check 0 Bash 'gh pr comment 12 --body "never gh pr update-branch --rebase"'
+check 0 Bash "gh api graphql -f query='mutation { updatePullRequestBranch(input: {pullRequestId: \"x\", updateMethod: MERGE}) { clientMutationId } }'"
 check 0 Bash 'gh pr create --title Merge --body "merge main into feature"'
 check 0 Bash 'gh api repos/owner/repo/pulls/12'
 check 0 Bash 'git commit -m "push --force to main is never done"'

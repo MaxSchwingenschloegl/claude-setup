@@ -336,7 +336,9 @@ newer Roslyn. `install.ps1` checks the plugin's start script, not the `csharp-ls
   requests and issues, also from a here-document or a message file; bulk staging (`git add -A`, `.`, `:/`, `-u`, the
   repository root, an exclude-only pathspec, `git commit -a`); skipped git hooks
   (`--no-verify`, `git commit -n`, setting `core.hooksPath`); and force pushes in every form
-  (`--force`, `-fu`, `--force-with-lease`, `+branch`, `--mirror`, deleting main). A push to main
+  (`--force`, `-fu`, `--force-with-lease`, `+branch`, `--mirror`, deleting main), and a pull
+  request updated by rebase, which rewrites its pushed branch on GitHub (`gh pr update-branch
+  --rebase`, the GraphQL `updatePullRequestBranch` with `REBASE`). A push to main
   and the merge of a pull request (`gh pr merge`, `gh api .../merge`) it puts to you as a
   permission question. Permission rules in `settings.json` match the start of a command only
   (`Bash(git push --force*)` misses `git -C dir push --force`); this hook does not match the
