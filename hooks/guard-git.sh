@@ -14,10 +14,13 @@
 #   attribution forms (a footer line of its own, after the robot emoji, or with the link to Claude
 #   Code; in prose it is no attribution), in `git commit` (its -m and --trailer values, an
 #   --author, a here-document, what is piped into -F -, the file of -F/--file/-t/--template when it
-#   exists), in `git merge`, `git tag` and `git notes` (-m/--message, a here-document, the file of
-#   -F/--file), in `gh pr ...`, `gh issue ...` and `gh release ...` (title, body, the file of
-#   --body-file/-F/--notes-file when it exists), and in `git config user.name|user.email`.
-#   "CLAUDE.md" alone is no attribution.
+#   exists, and what it takes from an existing commit, read with `git log` in the folder the
+#   commit runs in: message and author for -C, -c, --reuse-message and --reedit-message, the
+#   author not with --reset-author; the message for --fixup=amend:/reword:; the subject line for a
+#   plain --fixup and --squash), in `git merge`, `git tag` and `git notes` (-m/--message, a
+#   here-document, the file of -F/--file), in `gh pr ...`, `gh issue ...` and `gh release ...`
+#   (title, body, the file of --body-file/-F/--notes-file when it exists), and in
+#   `git config user.name|user.email`. "CLAUDE.md" alone is no attribution.
 # - Bulk staging: `git add` with -A, --all, -u, --update, --no-ignore-removal (also inside a group
 #   of short flags such as -vA), with `.`, `./`, `:/`, `*`, with the root folder of the repository
 #   (a submodule's folder is no root), or with exclude pathspecs only (`:!x`, `:^x`,
@@ -41,13 +44,17 @@
 # A missing or broken lib/command-segments.sh blocks every shell call (exit 2) until it is
 # restored, so a broken install shows instead of letting every command through unchecked.
 #
-# Not covered: a message taken from an existing commit (-c, -C, --reuse-message, --fixup), from a
-# command substitution ($(cat msg.txt)) or from a file the hook cannot find; a GraphQL query read
-# from a file (`gh api graphql -F query=@q.graphql`, `--input q.json`) and a REBASE variable in
-# JSON that is a quoted word or piped in (`echo '{...}' | gh api graphql --input -`); a plain `git push`
-# whose upstream is main; abbreviated long options other than --no-veri/--no-verif; a commit made
-# through the GitHub MCP tools; aliases, scripts, variables. It is a guard against accidents, not
-# against a determined attacker.
+# Not covered: a message git carries over by itself (`git commit --amend` without a new one keeps
+# HEAD's, the SQUASH_MSG or MERGE_MSG a commit after `git merge --squash` or a conflict takes up,
+# `git cherry-pick`, `git rebase`, a note copied with `git notes add -C/-c`), a commit taken from
+# a repository chosen with GIT_DIR or --git-dir (it is looked up in the folder) or named by a
+# command substitution (`-C "$(git rev-parse x)"`), a message from a command substitution
+# ($(cat msg.txt)) or from a file the hook cannot find; a GraphQL query read from a file
+# (`gh api graphql -F query=@q.graphql`, `--input q.json`) and a REBASE variable in JSON that is a
+# quoted word or piped in (`echo '{...}' | gh api graphql --input -`); a plain `git push` whose
+# upstream is main; abbreviated long options other than --no-veri/--no-verif (`--reuse` for
+# --reuse-message among them); a commit made through the GitHub MCP tools; aliases, scripts,
+# variables. It is a guard against accidents, not against a determined attacker.
 # Blocked although harmless: a commit message, pull request or issue text that quotes an
 # attribution line (a text about this hook, say); `git add -A --dry-run`; a gh api call naming
 # updatePullRequestBranch that passes another value starting with "rebase" (`-f b='Rebase ...'`).
@@ -134,12 +141,33 @@ with_files() {
     REPLY=$text
 }
 
+# REPLY: what commits $3... in repository $1 hand on, in `git log` format $2 (%B the whole
+# message, %s the subject line, %an <%ae> the author). A value git cannot resolve, or no git, adds
+# nothing: git commit fails on that value too. --end-of-options keeps a value such as
+# `--format=...` from being read as an option of git log. No prompt and no fetch: in a partial
+# clone a commit that is not there yet would otherwise be fetched, perhaps behind a login dialog
+# (GIT_NO_LAZY_FETCH needs git 2.44; older ones fetch, without asking).
+commit_messages() {
+    local dir=$1 format=$2 rev msg text=
+    shift 2
+    for rev in "$@"; do
+        [[ -n $rev ]] || continue
+        msg=$(GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never GIT_NO_LAZY_FETCH=1 git -C "$dir" --no-pager log -1 --no-show-signature --format="$format" --end-of-options "$rev" -- 2> /dev/null) && text+=$nl$msg
+    done
+    REPLY=$text
+}
+
 bulk_add() {
     block "\`git add $1\` stages everything, and a file nobody meant to commit rides along. Stage by path: \`git add path/one path/two\`; \`git status --short\` shows what changed."
 }
 
 force_push() {
-    block "\`git push $1\` rewrites or deletes history on the remote. Only the user does that; push a new commit instead, or ask the user."
+    case $1 in
+        --mirror | --delete* | :*)
+            block "\`git push $1\` deletes main or overwrites every branch on the remote. That is the user's decision; ask them." ;;
+        *)
+            block "\`git push $1\` rewrites history on the remote, and a pushed branch is never rewritten. Push a new commit instead; to take main in, \`git fetch origin\`, \`git merge origin/main\` and a normal push." ;;
+    esac
 }
 
 rebase_branch() {
@@ -262,7 +290,21 @@ check_git() {
             ((COMMIT_NOVERIFY)) && block "\`git commit -n\` / \`--no-verify\` skips the repository's git hooks. A failing hook is fixed or reported to the user, never skipped."
             segment_text
             with_files "$GIT_DIR_AT" "${COMMIT_FILES[@]}"
-            attributes_ai "$REPLY" && block "$attribution_reason" ;;
+            attributes_ai "$REPLY" && block "$attribution_reason"
+            if ((${#COMMIT_REUSED[@]} + ${#COMMIT_MESSAGES[@]} + ${#COMMIT_SUBJECTS[@]})); then
+                # -C and its kin take the author along, unless --reset-author
+                if ((COMMIT_RESET_AUTHOR)); then
+                    commit_messages "$GIT_DIR_AT" %B "${COMMIT_REUSED[@]}" "${COMMIT_MESSAGES[@]}"
+                else
+                    commit_messages "$GIT_DIR_AT" '%B%n%an <%ae>' "${COMMIT_REUSED[@]}"
+                    s=$REPLY
+                    commit_messages "$GIT_DIR_AT" %B "${COMMIT_MESSAGES[@]}"
+                    REPLY=$s$REPLY
+                fi
+                s=$REPLY
+                commit_messages "$GIT_DIR_AT" %s "${COMMIT_SUBJECTS[@]}"
+                attributes_ai "$s$nl$REPLY" && block "the message or author taken from an existing commit (-C, -c, --reuse-message, --reedit-message, --fixup, --squash) carries an AI attribution. Commits carry only the user's name: write the message yourself with -m or -F, without the Co-Authored-By / Claude-Session / 'Generated with Claude Code' line, and with -C add --reset-author when the commit's author is Claude."
+            fi ;;
         merge | tag | notes)
             # They write a message too: -m and --message among the words, the file of -F/--file
             local -a files=()

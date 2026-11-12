@@ -715,14 +715,22 @@ git_split() {
 }
 
 # For the arguments of `git commit` from index $1 of words: COMMIT_ALL (-a, --all), COMMIT_NOVERIFY
-# (-n, --no-verify), COMMIT_FILES (the files of -F, --file, -t, --template) and COMMIT_SPECS (the
-# paths it names). Option values are skipped, so a message is never read as an option.
+# (-n, --no-verify), COMMIT_FILES (the files of -F, --file, -t, --template), COMMIT_SPECS (the
+# paths it names), COMMIT_REUSED (the commits whose message and author it takes: -C, -c,
+# --reuse-message, --reedit-message), COMMIT_RESET_AUTHOR (--reset-author: the author is not
+# taken), COMMIT_MESSAGES (those whose message only it takes: --fixup=amend:/reword:) and
+# COMMIT_SUBJECTS (those whose subject line it takes: a plain --fixup, --squash). Option values are
+# skipped, so a message is never read as an option.
 commit_parse() {
     local j=$1 n=${#words[@]} a k c v after=0
     COMMIT_ALL=0
     COMMIT_NOVERIFY=0
     COMMIT_FILES=()
     COMMIT_SPECS=()
+    COMMIT_REUSED=()
+    COMMIT_RESET_AUTHOR=0
+    COMMIT_MESSAGES=()
+    COMMIT_SUBJECTS=()
     while ((j < n)); do
         a=${words[j]}
         ((j++))
@@ -736,7 +744,22 @@ commit_parse() {
             --no-veri | --no-verif | --no-verify) COMMIT_NOVERIFY=1 ;;
             --file=* | --template=*) COMMIT_FILES+=("${a#*=}") ;;
             --file | --template) COMMIT_FILES+=("${words[j]}"); ((j++)) ;;
-            --message | --reuse-message | --reedit-message | --fixup | --squash | --author | --date | --cleanup | --trailer | --pathspec-from-file) ((j++)) ;;
+            --reuse-message=* | --reedit-message=*) COMMIT_REUSED+=("${a#*=}") ;;
+            --reuse-message | --reedit-message) COMMIT_REUSED+=("${words[j]}"); ((j++)) ;;
+            --reset-author) COMMIT_RESET_AUTHOR=1 ;;
+            --fixup=* | --fixup | --squash=* | --squash)
+                if [[ $a == *=* ]]; then
+                    v=${a#*=}
+                else
+                    v=${words[j]}
+                    ((j++))
+                fi
+                if [[ $a == --fixup* && ($v == amend:* || $v == reword:*) ]]; then
+                    COMMIT_MESSAGES+=("${v#*:}")
+                else
+                    COMMIT_SUBJECTS+=("$v")
+                fi ;;
+            --message | --author | --date | --cleanup | --trailer | --pathspec-from-file) ((j++)) ;;
             --*) ;;
             -?*)
                 for ((k = 1; k < ${#a}; k++)); do
@@ -748,6 +771,7 @@ commit_parse() {
                             v=${a:k+1}
                             if [[ -z $v ]]; then v=${words[j]}; ((j++)); fi
                             [[ $c == F || $c == t ]] && COMMIT_FILES+=("$v")
+                            [[ $c == C || $c == c ]] && COMMIT_REUSED+=("$v")
                             break ;;
                         S | u) break ;;
                     esac

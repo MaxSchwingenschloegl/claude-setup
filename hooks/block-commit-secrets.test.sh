@@ -118,6 +118,14 @@ check 2 Bash 'git commit -m x a.txt'
 check 2 Bash 'git commit -m x -- a.txt'
 check 2 Bash 'git add a.txt && git commit -m x'
 check 0 Bash 'git add b.txt && git commit -m x'
+# The value of an option that takes a commit is no path, even when it is named like one
+check 0 Bash 'git commit --fixup a.txt'
+check 0 Bash 'git commit --squash a.txt'
+check 0 Bash 'git commit --fixup amend:a.txt'
+check 0 Bash 'git commit -C a.txt'
+check 0 Bash 'git commit --reuse-message a.txt'
+check 0 Bash 'git commit --reedit-message a.txt'
+check 2 Bash 'git commit --fixup=a.txt a.txt'
 
 # Untracked files count when a git add in the same command names them
 fresh

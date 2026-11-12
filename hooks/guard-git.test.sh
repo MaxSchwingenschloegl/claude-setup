@@ -340,6 +340,84 @@ check 0 PowerShell "git commit -m 'Fix; then add -A'"
 check 0 PowerShell 'git add src\a.ps1; git commit -m "Fix"'
 check 0 Read command 'git add -A'
 
+# A message taken from an existing commit is read from the repository: -C, -c, --reuse-message and
+# --reedit-message take the whole message, --fixup=amend:/reword: too, a plain --fixup and --squash
+# only the subject line. Commits made with plumbing, so no hook and no identity are needed.
+real=$tmp/real
+git init -q "$real"
+export GIT_AUTHOR_NAME=T GIT_AUTHOR_EMAIL=t@example.org GIT_COMMITTER_NAME=T GIT_COMMITTER_EMAIL=t@example.org
+tree=$(git -C "$real" mktree < /dev/null)
+mkcommit() {  # tag, message
+    local c
+    c=$(printf '%s\n' "$2" | git -C "$real" commit-tree "$tree")
+    git -C "$real" tag "$1" "$c"
+}
+mkcommit ai "Fix the parser"$'\n\n'"$trailer"
+mkcommit ok "Fix the parser"$'\n\n'"Co-Authored-By: Max <max@example.org>"
+mkcommit aisubject "$generated"
+# -C, -c, --reuse-message and --reedit-message take over the author too, unless --reset-author
+GIT_AUTHOR_NAME=Claude GIT_AUTHOR_EMAIL=noreply@anthropic.com mkcommit aiauthor "Fix the parser"
+git -C "$real" update-ref refs/heads/main "$(git -C "$real" rev-parse ai)"
+git -C "$real" symbolic-ref HEAD refs/heads/main
+realw=$(cygpath -w "$real")
+check 2 Bash 'git commit -C ai' "$realw"
+check 2 Bash 'git commit -c ai' "$realw"
+check 2 Bash 'git commit -Cai' "$realw"
+check 2 Bash 'git commit -sC ai' "$realw"
+check 2 Bash 'git commit --amend -C HEAD' "$realw"
+check 2 Bash 'git commit --reuse-message=ai' "$realw"
+check 2 Bash 'git commit --reuse-message ai' "$realw"
+check 2 Bash 'git commit --reedit-message=ai' "$realw"
+check 2 Bash 'git commit --fixup=amend:ai' "$realw"
+check 2 Bash 'git commit --fixup reword:ai' "$realw"
+check 2 Bash 'git commit --fixup aisubject' "$realw"
+check 2 Bash 'git commit --squash=aisubject' "$realw"
+check 2 Bash "git commit -C $(git -C "$real" rev-parse ai)" "$realw"
+check 2 Bash 'git add a.txt && git commit -C ai' "$realw"
+check 2 Bash "git -C '$realw' commit -C ai"
+check 2 PowerShell 'git commit -C ai' "$realw"
+check 2 Bash 'git commit -C aiauthor' "$realw"
+check 2 Bash 'git commit -c aiauthor' "$realw"
+check 2 Bash 'git commit --reuse-message=aiauthor' "$realw"
+check 2 Bash 'git commit --reedit-message aiauthor' "$realw"
+check 0 Bash 'git commit -C aiauthor --reset-author' "$realw"
+check 2 Bash 'git commit -C ai --reset-author' "$realw"
+check 2 Bash 'git commit --fixup=amend:ai --reset-author' "$realw"
+check 0 Bash 'git commit --fixup=amend:aiauthor' "$realw"
+check 0 Bash 'git commit --squash aiauthor' "$realw"
+check 0 Bash 'git commit -C ok' "$realw"
+check 0 Bash 'git commit -c ok' "$realw"
+check 0 Bash 'git commit --reuse-message=ok' "$realw"
+check 0 Bash 'git commit --fixup=amend:ok' "$realw"
+check 0 Bash 'git commit --fixup ai' "$realw"
+check 0 Bash 'git commit --squash ai' "$realw"
+check 0 Bash 'git commit -C no-such-commit' "$realw"
+# The value is a commit, never an option of the command that reads it: read as one, git would
+# print the message of HEAD, which carries the trailer
+check 0 Bash 'git commit -C --format=%B' "$realw"
+check 0 Bash 'git log -C ai' "$realw"
+check 0 Bash 'git commit -m "taken from -C ai"' "$realw"
+check 0 Bash 'git commit -C ai'
+
+# The reason fits the push: a rewrite is answered with the merge path, deleting main or
+# --mirror is the user's decision
+says() {  # text the reason must hold, command
+    local value=$2 cwd json err
+    cwd=$(cygpath -w "$repo")
+    cwd=${cwd//\\/\\\\}
+    json="{\"session_id\":\"t\",\"cwd\":\"$cwd\",\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$value\"}}"
+    err=$(printf '%s' "$json" | bash "$hook" 2>&1 >/dev/null)
+    run=$((run + 1))
+    [[ $err == *"$1"* ]] && return 0
+    fail=$((fail + 1))
+    echo "FAIL expected a reason with '$1': $2 (got: ${err:0:160})"
+}
+says 'never rewritten' 'git push --force origin feature'
+says 'git merge origin/main' 'git push origin +feature'
+says "the user's decision" 'git push origin --delete main'
+says "the user's decision" 'git push origin :main'
+says "the user's decision" 'git push --mirror origin'
+
 # A broken install blocks, so the gap shows, instead of letting every command through unchecked
 mkdir -p "$tmp/nolib"
 cp "$hook" "$tmp/nolib/guard-git.sh"
