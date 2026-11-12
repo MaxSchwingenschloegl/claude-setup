@@ -5,7 +5,8 @@ only its own login; rules, settings, plugins, history and memory are shared. A f
 set up with two clones and one script.
 
 **What lives here:** the tools: the installer (`install.ps1`), the PowerShell functions that
-switch accounts (`shell/`, `scripts/`), a plugin scan (`scripts/vet-plugins.ps1`), guards
+switch accounts (`shell/`, `scripts/`), a plugin scan (`scripts/vet-plugins.ps1`), a check of
+the machine (`scripts/check-setup.ps1`), guards
 for secrets, searches, git commands, commits and server access (`hooks/`), a status line (`statusline/`), skill groups as plugins you
 enable per project (`plugins/`) and two templates for your own configuration (`templates/`).
 **What never lives here:** your configuration. Accounts, settings, rules and global skills live
@@ -333,14 +334,15 @@ newer Roslyn. `install.ps1` checks the plugin's start script, not the `csharp-ls
 - `hooks/guard-git.sh` is a PreToolUse hook for Bash and PowerShell that blocks git and gh
   commands the git rules forbid: AI attribution (Co-Authored-By naming Claude, Claude-Session,
   "Generated with Claude Code", a Claude author) in commit, merge, tag and note messages, pull
-  requests and issues, also from a here-document or a message file; bulk staging (`git add -A`, `.`, `:/`, `-u`, the
-  repository root, an exclude-only pathspec, `git commit -a`); skipped git hooks
-  (`--no-verify`, `git commit -n`, setting `core.hooksPath`); and force pushes in every form
-  (`--force`, `-fu`, `--force-with-lease`, `+branch`, `--mirror`, deleting main), and a pull
-  request updated by rebase, which rewrites its pushed branch on GitHub (`gh pr update-branch
-  --rebase`, the GraphQL `updatePullRequestBranch` with `REBASE`). A push to main
-  and the merge of a pull request (`gh pr merge`, `gh api .../merge`) it puts to you as a
-  permission question. Permission rules in `settings.json` match the start of a command only
+  requests and issues, also from a here-document, a message file or the commit whose message
+  and author a commit takes over (`git commit -C`, `-c`, `--reuse-message`, `--fixup`,
+  `--squash`); bulk staging (`git add -A`, `.`, `:/`, `-u`, the repository root, an
+  exclude-only pathspec, `git commit -a`); skipped git hooks (`--no-verify`, `git commit -n`,
+  setting `core.hooksPath`); and force pushes in every form (`--force`, `-fu`,
+  `--force-with-lease`, `+branch`, `--mirror`, deleting main), and a pull request updated by
+  rebase, which rewrites its pushed branch on GitHub (`gh pr update-branch --rebase`, the
+  GraphQL `updatePullRequestBranch` with `REBASE`). A push to main and the merge of a pull
+  request (`gh pr merge`, `gh api .../merge`) it puts to you as a permission question. Permission rules in `settings.json` match the start of a command only
   (`Bash(git push --force*)` misses `git -C dir push --force`); this hook does not match the
   command text either: it splits compound commands outside quotes and here-documents and looks
   only at the program at command position, so a pull request body that mentions `git add -A`
@@ -396,6 +398,20 @@ newer Roslyn. `install.ps1` checks the plugin's start script, not the `csharp-ls
 
 `git pull` in this repo, then `.\install.ps1`. Your configuration is untouched by updates; compare
 it with `templates/` now and then for new defaults you may want.
+
+### Checking a machine
+
+`.\scripts\check-setup.ps1` lists what needs a look on this machine and changes nothing: links
+that no longer point where `install.ps1` put them; this repo, your configuration and its
+marketplaces when they are not on their default branch, behind or ahead of origin (it fetches
+first; `-NoFetch` skips that), or hold uncommitted changes, such as the ones Claude Code writes
+into `settings.json` itself; enabled plugins that are not installed or not scanned, and plugins
+installed for all projects but not enabled. It also lists the enabled plugins and those
+installed for single project folders, marking folders that are gone and your home folder. Last
+come worktrees: registered ones whose folder is gone, and folders a failed `git worktree remove`
+left behind ("Directory not empty" on a locked `node_modules`), next to the repositories or in
+a repository's `.claude\worktrees`. It looks for those in the folder this repo is in, or the one
+given with `-ReposDir`. Exit code 1 means something needs a look.
 
 ## Uninstall
 

@@ -1,5 +1,6 @@
-# Shared by install.ps1 and shell/claude-accounts.ps1: reads the configuration's accounts.json
-# and defines which items are linked where, so the installer and the startup check always agree.
+# Shared by install.ps1, shell/claude-accounts.ps1 and scripts/check-setup.ps1: reads the
+# configuration's accounts.json and defines which items are linked where, so the installer and
+# the checks always agree.
 # The configuration folder is named by the user environment variable CLAUDE_SETUP_CONFIG, which
 # install.ps1 sets.
 
@@ -69,4 +70,24 @@ function Test-ClaudeLink([string]$Path, [string]$Target) {
     if (-not $actual) { return $false }
     if (-not [IO.Path]::IsPathRooted($actual)) { $actual = Join-Path (Split-Path -Parent $Path) $actual }
     return (Get-ClaudeFullPath $actual) -eq (Get-ClaudeFullPath $Target)
+}
+
+# The links of the hub and of one account that do not point where install.ps1 puts them
+function Get-ClaudeBrokenLinks([string]$Account) {
+    $L = $ClaudeLayout
+    $dir = Get-ClaudeAccountDir $Account
+    foreach ($name in $L.ConfigFiles) {
+        foreach ($base in $L.Hub, $dir) {
+            if (-not (Test-ClaudeLink "$base\$name" "$($L.Config)\$name")) { "$base\$name" }
+        }
+    }
+    foreach ($name in $L.ConfigDirs + $L.ToolDirs) {
+        if (-not (Test-ClaudeLink "$($L.Hub)\$name" (Get-ClaudeHubTarget $name))) { "$($L.Hub)\$name" }
+    }
+    foreach ($name in $L.GlobalSkills) {
+        if (-not (Test-ClaudeLink "$dir\skills\$name" "$($L.Config)\skills\$name")) { "$dir\skills\$name" }
+    }
+    foreach ($name in $L.AccountFiles + $L.AccountDirs) {
+        if (-not (Test-ClaudeLink "$dir\$name" "$($L.Hub)\$name")) { "$dir\$name" }
+    }
 }

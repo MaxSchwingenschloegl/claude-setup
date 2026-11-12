@@ -15,26 +15,10 @@ catch { Write-Warning "Claude setup: $($_.Exception.Message)"; return }
 # Warns when a link has turned into a plain file (a tool that saves by replacing the file does
 # that), because the accounts would then drift apart without notice.
 function Test-ClaudeAccount([string]$Account) {
-    $L = $ClaudeLayout
-    $broken = @()
-    $dir = Get-ClaudeAccountDir $Account
-    foreach ($name in $L.ConfigFiles) {
-        foreach ($base in $L.Hub, $dir) {
-            if (-not (Test-ClaudeLink "$base\$name" "$($L.Config)\$name")) { $broken += "$base\$name" }
-        }
-    }
-    foreach ($name in $L.ConfigDirs + $L.ToolDirs) {
-        if (-not (Test-ClaudeLink "$($L.Hub)\$name" (Get-ClaudeHubTarget $name))) { $broken += "$($L.Hub)\$name" }
-    }
-    foreach ($name in $L.GlobalSkills) {
-        if (-not (Test-ClaudeLink "$dir\skills\$name" "$($L.Config)\skills\$name")) { $broken += "$dir\skills\$name" }
-    }
-    foreach ($name in $L.AccountFiles + $L.AccountDirs) {
-        if (-not (Test-ClaudeLink "$dir\$name" "$($L.Hub)\$name")) { $broken += "$dir\$name" }
-    }
+    $broken = @(Get-ClaudeBrokenLinks $Account)
     if ($broken.Count) {
         Write-Warning ("Claude setup: not linked as expected: $($broken -join ', '). " +
-                       "Run $($L.Root)\install.ps1; it keeps a backup of every file it replaces.")
+                       "Run $($ClaudeLayout.Root)\install.ps1; it keeps a backup of every file it replaces.")
     }
 }
 

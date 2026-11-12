@@ -1,4 +1,4 @@
-# Shared by install.ps1 and scripts/vet-plugins.ps1: where a plugin's files are, a fingerprint of
+# Shared by install.ps1, scripts/vet-plugins.ps1 and scripts/check-setup.ps1: where a plugin's files are, a fingerprint of
 # their content, and what the configuration's vetting.json says about them. Needs common.ps1.
 
 # A skillspector score above this needs an approval recorded in vetting.json
@@ -201,4 +201,19 @@ function Get-PluginVerdict($Entry, [string]$Hash, [string]$Commit) {
     if ([double]$Entry.score -gt $PluginScoreLimit) { return 'unapproved' }
     if ($null -eq $Entry.score -or ($Entry.analysis -and $Entry.analysis -ne 'complete')) { return 'incomplete' }
     return 'ok'
+}
+
+# Each verdict in words
+$PluginVerdictText = @{
+    ok = 'scanned'; unvetted = 'not scanned'; changed = 'changed since the scan'
+    unapproved = "score above $PluginScoreLimit, not approved"; incomplete = 'scan incomplete, not approved'
+    unknown = 'marketplace not on this machine'; unpinned = 'remote source without a pinned commit'
+    unreadable = 'files could not be read'
+}
+
+# The verdict for a plugin folder, with $Vetting from Read-PluginVetting; a file that cannot be
+# read counts as not vetted
+function Get-FolderVerdict($Vetting, [string]$Plugin, [string]$Folder) {
+    try { return Get-PluginVerdict $Vetting[$Plugin] (Get-PluginHash $Folder $Plugin) }
+    catch { Write-Warning "Could not read the files of ${Plugin}: $($_.Exception.Message)"; return 'unreadable' }
 }
