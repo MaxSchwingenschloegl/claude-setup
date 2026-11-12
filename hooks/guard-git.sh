@@ -12,15 +12,18 @@
 # - AI attribution: a `...-by:` line naming Claude or Anthropic (Co-Authored-By and the like), a
 #   `Claude-Session:` line, noreply@anthropic.com, and "Generated with/by Claude" in its
 #   attribution forms (a footer line of its own, after the robot emoji, or with the link to Claude
-#   Code; in prose it is no attribution), in `git commit` (its -m and --trailer values, an
-#   --author, a here-document, what is piped into -F -, the file of -F/--file/-t/--template when it
-#   exists, and what it takes from an existing commit, read with `git log` in the folder the
-#   commit runs in: message and author for -C, -c, --reuse-message and --reedit-message, the
-#   author not with --reset-author; the message for --fixup=amend:/reword:; the subject line for a
-#   plain --fixup and --squash), in `git merge`, `git tag` and `git notes` (-m/--message, a
-#   here-document, the file of -F/--file), in `gh pr ...`, `gh issue ...` and `gh release ...`
-#   (title, body, the file of --body-file/-F/--notes-file when it exists), and in
-#   `git config user.name|user.email`. "CLAUDE.md" alone is no attribution.
+#   Code; in prose it is no attribution), in `git commit` (its -m and --trailer values, a
+#   here-document, what is piped into -F -, the file of -F/--file/-t/--template when it exists,
+#   and what it takes from an existing commit, read with `git log` in the folder the commit runs
+#   in: the message for -C, -c, --reuse-message, --reedit-message and --fixup=amend:/reword:, the
+#   subject line for a plain --fixup and --squash), in `git merge`, `git tag` and `git notes`
+#   (-m/--message, a here-document, the file of -F/--file), in `gh pr ...`, `gh issue ...` and
+#   `gh release ...` (title, body, the file of --body-file/-F/--notes-file when it exists).
+#   "CLAUDE.md" alone is no attribution.
+# - A Claude or Anthropic identity (either word in the name or the address, a person called
+#   Claude too): `git config user.name|user.email`, `git commit --author`, and the author a
+#   commit keeps, from the commit -C, -c, --reuse-message or --reedit-message names or, with
+#   --amend, from HEAD (not with --reset-author, the last of it and --no-reset-author counts).
 # - Bulk staging: `git add` with -A, --all, -u, --update, --no-ignore-removal (also inside a group
 #   of short flags such as -vA), with `.`, `./`, `:/`, `*`, with the root folder of the repository
 #   (a submodule's folder is no root), or with exclude pathspecs only (`:!x`, `:^x`,
@@ -31,7 +34,8 @@
 #   <value>`, --unset, --add, --replace-all, `git config set|unset`, --remove-section core.
 #   Reading it (`git config core.hooksPath`, --get) stays allowed.
 # - Rewriting the remote: `git push` with --force, -f (also in -fu), --force-with-lease[=...],
-#   --mirror, a +refspec, or deleting main (`:main`, --delete/-d main); `gh pr update-branch
+#   --mirror, a +refspec, or deleting main (`:main`, `+:main`, --delete/-d main; it gets its own
+#   reason, as the merge path does not apply there); `gh pr update-branch
 #   --rebase` and the GraphQL updatePullRequestBranch with updateMethod REBASE, which rebase the
 #   pushed branch on GitHub's side. Plain `gh pr update-branch` merges main in and stays allowed.
 # Asked: `git push` whose refspec reaches main (main, HEAD:main, x:main, refs/heads/main),
@@ -118,6 +122,12 @@ attributes_ai() {
     [[ $t =~ $by || $t == *claude-session:* || $t =~ $footer || $t =~ $emoji || $t =~ $link || $t == *noreply@anthropic.com* ]]
 }
 
+# True when a name or e-mail address names Claude or Anthropic (a person called Claude as well;
+# for a commit of theirs, --reset-author helps)
+ai_identity() {
+    [[ $1 =~ [Cc][Ll][Aa][Uu][Dd][Ee]|[Aa][Nn][Tt][Hh][Rr][Oo][Pp][Ii][Cc] ]]
+}
+
 # REPLY: the command's words, one per line so each starts a line as a footer would, then its
 # here-documents and what is piped into it
 segment_text() {
@@ -163,7 +173,7 @@ bulk_add() {
 
 force_push() {
     case $1 in
-        --mirror | --delete* | :*)
+        --mirror | --delete* | :* | +:*)
             block "\`git push $1\` deletes main or overwrites every branch on the remote. That is the user's decision; ask them." ;;
         *)
             block "\`git push $1\` rewrites history on the remote, and a pushed branch is never rewritten. Push a new commit instead; to take main in, \`git fetch origin\`, \`git merge origin/main\` and a normal push." ;;
@@ -180,12 +190,13 @@ is_main() {
 }
 
 check_push() {
-    local i k c a dst del=0
+    local i k c a r dst del=0 force=
     local -a pos=()
     for ((i = 0; i < ${#args[@]}; i++)); do
         a=${args[i]}
         case $a in
-            --force | --force-with-lease | --force-with-lease=* | --mirror) force_push "$a" ;;
+            --mirror) force_push "$a" ;;
+            --force | --force-with-lease | --force-with-lease=*) force=${force:-$a} ;;
             --delete) del=1 ;;
             --repo | --receive-pack | --exec | --push-option) ((i++)) ;;
             --*) ;;
@@ -193,7 +204,7 @@ check_push() {
                 for ((k = 1; k < ${#a}; k++)); do
                     c=${a:k:1}
                     case $c in
-                        f) force_push "$a" ;;
+                        f) force=${force:-$a} ;;
                         d) del=1 ;;
                         o) ((k == ${#a} - 1)) && ((i++)); break ;;
                     esac
@@ -201,17 +212,21 @@ check_push() {
             *) pos+=("$a") ;;
         esac
     done
-    # The first word is the remote, the others are refspecs
+    # The first word is the remote, the others are refspecs. Deleting main is answered before a
+    # forced push, with or without -f or a +
     for a in "${pos[@]:1}"; do
-        [[ $a == +* ]] && force_push "$a"
+        [[ $a == +* ]] && force=${force:-$a}
+        r=${a#+}
         if ((del)); then
-            is_main "$a" && force_push "--delete $a"
+            is_main "$r" && force_push "--delete $a"
             continue
         fi
-        dst=${a##*:}
-        [[ $a == :* ]] && is_main "$dst" && force_push "$a"
-        [[ $a != :* ]] && is_main "$dst" && ask "A push to main changes the shared default branch. The user confirms it."
+        dst=${r##*:}
+        [[ $r == :* ]] && is_main "$dst" && force_push "$a"
+        [[ $r != :* ]] && is_main "$dst" && ask "A push to main changes the shared default branch. The user confirms it."
     done
+    [[ -n $force ]] && force_push "$force"
+    return 0
 }
 
 check_git() {
@@ -291,19 +306,18 @@ check_git() {
             segment_text
             with_files "$GIT_DIR_AT" "${COMMIT_FILES[@]}"
             attributes_ai "$REPLY" && block "$attribution_reason"
+            # The author: --author, and what -C and its kin take over, or --amend from HEAD,
+            # unless --reset-author
+            local -a from=("${COMMIT_REUSED[@]}")
+            ((COMMIT_AMEND && ${#from[@]} == 0)) && from=(HEAD)
+            REPLY=
+            ((COMMIT_RESET_AUTHOR || ${#from[@]} == 0)) || commit_messages "$GIT_DIR_AT" '%an <%ae>' "${from[@]}"
+            ai_identity "${COMMIT_AUTHORS[*]}$nl$REPLY" && block "the commit would carry a Claude or Anthropic author (from --author, from the commit -C, -c, --reuse-message or --reedit-message takes over, or from HEAD on --amend). Commits carry only the user's name: add --reset-author, or leave the author out."
             if ((${#COMMIT_REUSED[@]} + ${#COMMIT_MESSAGES[@]} + ${#COMMIT_SUBJECTS[@]})); then
-                # -C and its kin take the author along, unless --reset-author
-                if ((COMMIT_RESET_AUTHOR)); then
-                    commit_messages "$GIT_DIR_AT" %B "${COMMIT_REUSED[@]}" "${COMMIT_MESSAGES[@]}"
-                else
-                    commit_messages "$GIT_DIR_AT" '%B%n%an <%ae>' "${COMMIT_REUSED[@]}"
-                    s=$REPLY
-                    commit_messages "$GIT_DIR_AT" %B "${COMMIT_MESSAGES[@]}"
-                    REPLY=$s$REPLY
-                fi
+                commit_messages "$GIT_DIR_AT" %B "${COMMIT_REUSED[@]}" "${COMMIT_MESSAGES[@]}"
                 s=$REPLY
                 commit_messages "$GIT_DIR_AT" %s "${COMMIT_SUBJECTS[@]}"
-                attributes_ai "$s$nl$REPLY" && block "the message or author taken from an existing commit (-C, -c, --reuse-message, --reedit-message, --fixup, --squash) carries an AI attribution. Commits carry only the user's name: write the message yourself with -m or -F, without the Co-Authored-By / Claude-Session / 'Generated with Claude Code' line, and with -C add --reset-author when the commit's author is Claude."
+                attributes_ai "$s$nl$REPLY" && block "the message taken from an existing commit (-C, -c, --reuse-message, --reedit-message, --fixup, --squash) carries an AI attribution. Commits carry only the user's name: write the message yourself with -m or -F, without the Co-Authored-By / Claude-Session / 'Generated with Claude Code' line."
             fi ;;
         merge | tag | notes)
             # They write a message too: -m and --message among the words, the file of -F/--file
@@ -367,7 +381,7 @@ check_git() {
                     block "\`git config core.hooksPath\` switches the repository's git hooks off or replaces them. Only the user changes it; ask them."
                 fi
             fi
-            if [[ ($key == user.name || $key == user.email) && ${#pos[@]} -ge 2 && ${pos[*]:1} =~ [Cc][Ll][Aa][Uu][Dd][Ee]|[Aa][Nn][Tt][Hh][Rr][Oo][Pp][Ii][Cc] ]]; then
+            if [[ ($key == user.name || $key == user.email) && ${#pos[@]} -ge 2 ]] && ai_identity "${pos[*]:1}"; then
                 block "commits carry only the user's name; never set a Claude or Anthropic identity."
             fi ;;
     esac

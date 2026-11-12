@@ -717,10 +717,11 @@ git_split() {
 # For the arguments of `git commit` from index $1 of words: COMMIT_ALL (-a, --all), COMMIT_NOVERIFY
 # (-n, --no-verify), COMMIT_FILES (the files of -F, --file, -t, --template), COMMIT_SPECS (the
 # paths it names), COMMIT_REUSED (the commits whose message and author it takes: -C, -c,
-# --reuse-message, --reedit-message), COMMIT_RESET_AUTHOR (--reset-author: the author is not
-# taken), COMMIT_MESSAGES (those whose message only it takes: --fixup=amend:/reword:) and
-# COMMIT_SUBJECTS (those whose subject line it takes: a plain --fixup, --squash). Option values are
-# skipped, so a message is never read as an option.
+# --reuse-message, --reedit-message), COMMIT_AMEND (--amend: HEAD's author is kept),
+# COMMIT_RESET_AUTHOR (--reset-author, the last of it and --no-reset-author: no author is taken
+# over), COMMIT_AUTHORS (the values of --author), COMMIT_MESSAGES (the commits whose message only
+# it takes: --fixup=amend:/reword:) and COMMIT_SUBJECTS (those whose subject line it takes: a plain
+# --fixup, --squash). Option values are skipped, so a message is never read as an option.
 commit_parse() {
     local j=$1 n=${#words[@]} a k c v after=0
     COMMIT_ALL=0
@@ -728,7 +729,9 @@ commit_parse() {
     COMMIT_FILES=()
     COMMIT_SPECS=()
     COMMIT_REUSED=()
+    COMMIT_AMEND=0
     COMMIT_RESET_AUTHOR=0
+    COMMIT_AUTHORS=()
     COMMIT_MESSAGES=()
     COMMIT_SUBJECTS=()
     while ((j < n)); do
@@ -747,6 +750,10 @@ commit_parse() {
             --reuse-message=* | --reedit-message=*) COMMIT_REUSED+=("${a#*=}") ;;
             --reuse-message | --reedit-message) COMMIT_REUSED+=("${words[j]}"); ((j++)) ;;
             --reset-author) COMMIT_RESET_AUTHOR=1 ;;
+            --no-reset-author) COMMIT_RESET_AUTHOR=0 ;;
+            --amend) COMMIT_AMEND=1 ;;
+            --author=*) COMMIT_AUTHORS+=("${a#*=}") ;;
+            --author) COMMIT_AUTHORS+=("${words[j]}"); ((j++)) ;;
             --fixup=* | --fixup | --squash=* | --squash)
                 if [[ $a == *=* ]]; then
                     v=${a#*=}
@@ -759,7 +766,7 @@ commit_parse() {
                 else
                     COMMIT_SUBJECTS+=("$v")
                 fi ;;
-            --message | --author | --date | --cleanup | --trailer | --pathspec-from-file) ((j++)) ;;
+            --message | --date | --cleanup | --trailer | --pathspec-from-file) ((j++)) ;;
             --*) ;;
             -?*)
                 for ((k = 1; k < ${#a}; k++)); do

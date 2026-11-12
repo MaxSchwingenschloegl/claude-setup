@@ -357,6 +357,8 @@ mkcommit ok "Fix the parser"$'\n\n'"Co-Authored-By: Max <max@example.org>"
 mkcommit aisubject "$generated"
 # -C, -c, --reuse-message and --reedit-message take over the author too, unless --reset-author
 GIT_AUTHOR_NAME=Claude GIT_AUTHOR_EMAIL=noreply@anthropic.com mkcommit aiauthor "Fix the parser"
+GIT_AUTHOR_NAME=Claude GIT_AUTHOR_EMAIL=claude@anthropic.com mkcommit aiant "Fix the parser"
+GIT_AUTHOR_NAME="Claude Code" GIT_AUTHOR_EMAIL=claude@users.noreply.github.com mkcommit aigh "Fix the parser"
 git -C "$real" update-ref refs/heads/main "$(git -C "$real" rev-parse ai)"
 git -C "$real" symbolic-ref HEAD refs/heads/main
 realw=$(cygpath -w "$real")
@@ -381,7 +383,27 @@ check 2 Bash 'git commit -c aiauthor' "$realw"
 check 2 Bash 'git commit --reuse-message=aiauthor' "$realw"
 check 2 Bash 'git commit --reedit-message aiauthor' "$realw"
 check 0 Bash 'git commit -C aiauthor --reset-author' "$realw"
+check 2 Bash 'git commit -C aiauthor --reset-author --no-reset-author' "$realw"
+check 0 Bash 'git commit --no-reset-author -C aiauthor --reset-author' "$realw"
 check 2 Bash 'git commit -C ai --reset-author' "$realw"
+# A Claude or Anthropic identity, as `git config user.name|user.email` reads it
+check 2 Bash 'git commit -C aiant' "$realw"
+check 2 Bash 'git commit -C aigh' "$realw"
+check 2 Bash 'git commit --author "Claude <claude@anthropic.com>" -m x'
+check 2 Bash 'git commit --author="Anthropic Bot <bot@example.org>" -m x'
+check 0 Bash 'git commit --author "Max Example <max@example.org>" -m x'
+# --amend keeps HEAD's author unless --reset-author
+realc=$tmp/realc
+git init -q "$realc"
+c=$(printf 'Fix the parser\n' | GIT_AUTHOR_NAME=Claude GIT_AUTHOR_EMAIL=noreply@anthropic.com git -C "$realc" commit-tree "$(git -C "$realc" mktree < /dev/null)")
+git -C "$realc" update-ref refs/heads/main "$c"
+git -C "$realc" symbolic-ref HEAD refs/heads/main
+realcw=$(cygpath -w "$realc")
+check 2 Bash 'git commit --amend -m "Fix it"' "$realcw"
+check 2 Bash 'git commit --amend --no-edit' "$realcw"
+check 0 Bash 'git commit --amend --reset-author -m "Fix it"' "$realcw"
+check 0 Bash 'git commit --amend -m "Fix it"' "$realw"
+check 0 Bash 'git commit -m "Fix it"' "$realcw"
 check 2 Bash 'git commit --fixup=amend:ai --reset-author' "$realw"
 check 0 Bash 'git commit --fixup=amend:aiauthor' "$realw"
 check 0 Bash 'git commit --squash aiauthor' "$realw"
@@ -417,6 +439,12 @@ says 'git merge origin/main' 'git push origin +feature'
 says "the user's decision" 'git push origin --delete main'
 says "the user's decision" 'git push origin :main'
 says "the user's decision" 'git push --mirror origin'
+says "the user's decision" 'git push origin +:main'
+says "the user's decision" 'git push -fd origin main'
+says "the user's decision" 'git push --force --delete origin main'
+says "the user's decision" 'git push --delete origin +main'
+says 'never rewritten' 'git push --delete origin +feature'
+check 0 Bash 'git push origin --delete feature'
 
 # A broken install blocks, so the gap shows, instead of letting every command through unchecked
 mkdir -p "$tmp/nolib"
