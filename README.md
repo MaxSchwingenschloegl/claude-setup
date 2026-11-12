@@ -294,6 +294,14 @@ With a Node version manager such as fnm the npm programs belong to its default N
 install them again after switching it. The check uses the PATH of the shell that runs
 `install.ps1`, so run it from the same kind of shell you start Claude Code from.
 
+`rust-lsp` leaves `src-tauri/binaries` out of rust-analyzer's file watching
+(`files.exclude`). On Windows rust-analyzer holds one handle per folder it watches, and those
+handles refuse the rename of a large bundle there, such as a Tauri sidecar build (measured in one
+project: 1,035 handles on that folder without the exclude, none with it). A
+`rust-analyzer.toml` in the project does not help: its `[files] exclude` left the handles in
+place. Shortcut: the exclude also hides a real `src-tauri/binaries` source folder in any other
+Rust project; upgrade to a per-project variant of the plugin if one ever needs it.
+
 `csharp-lsp` starts `csharp-ls` without a solution, and csharp-ls then loads the solution with
 the most projects below the project, the ones in `.claude/worktrees/` included; a worktree on a
 newer branch often has more. A file of the main checkout then belongs to no loaded project and

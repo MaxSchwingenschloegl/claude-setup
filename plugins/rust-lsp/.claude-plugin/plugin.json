@@ -1,7 +1,7 @@
 {
   "name": "rust-lsp",
-  "version": "1.0.0",
-  "description": "rust-analyzer for Rust projects, checking into target/rust-analyzer so its background cargo check never waits on, or blocks, your own builds for the target directory lock. Needs rust-analyzer on PATH (rustup component add rust-analyzer).",
+  "version": "1.0.1",
+  "description": "rust-analyzer for Rust projects, checking into target/rust-analyzer so its background cargo check never waits on, or blocks, your own builds for the target directory lock. It leaves src-tauri/binaries out of its file watching: on Windows each watched folder holds a handle, and those handles block the rename of a large bundle there (a Tauri sidecar). Shortcut: this also hides a real src-tauri/binaries source folder in any other Rust project; upgrade to a per-project variant if one ever needs it. Needs rust-analyzer on PATH (rustup component add rust-analyzer).",
   "author": {
     "name": "MaxSchwingenschloegl"
   },
@@ -14,6 +14,9 @@
       "initializationOptions": {
         "cargo": {
           "targetDir": true
+        },
+        "files": {
+          "exclude": ["src-tauri/binaries"]
         }
       }
     }

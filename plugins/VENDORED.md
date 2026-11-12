@@ -111,9 +111,11 @@ the skillspector scan).
 Written here, not vendored: a plugin.json that declares rust-analyzer as a language server for
 `.rs` files with the initialization option `cargo.targetDir: true`, so its `cargo check` builds
 into `target/rust-analyzer` instead of `target/`. The official `rust-analyzer-lsp` has no such
-option and shares the target directory with every build. It runs the `rust-analyzer` on PATH and
-nothing else. skillspector 2.12.0 (`claude_cli`) on 2026-11-01: score 0, SAFE, no findings, all
-three semantic analyzers completed.
+option and shares the target directory with every build. Since 1.0.1 it also sets
+`files.exclude: ["src-tauri/binaries"]`, so the folder of a Tauri sidecar bundle is not watched
+and its rename is not refused (README, "Language servers"). It runs the `rust-analyzer` on PATH
+and nothing else. skillspector 2.12.0 (`claude_cli`) on 2026-11-12, version 1.0.1: score 0,
+SAFE, no findings, all three semantic analyzers completed.
 
 ## csharp-solution-lsp
 
