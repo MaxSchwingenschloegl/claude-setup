@@ -409,9 +409,11 @@ into `settings.json` itself; enabled plugins that are not installed or not scann
 installed for all projects but not enabled. It also lists the enabled plugins and those
 installed for single project folders, marking folders that are gone and your home folder. Last
 come worktrees: registered ones whose folder is gone, and folders a failed `git worktree remove`
-left behind ("Directory not empty" on a locked `node_modules`), next to the repositories or in
-a repository's `.claude\worktrees`. It looks for those in the folder this repo is in, or the one
-given with `-ReposDir`. Exit code 1 means something needs a look.
+left behind ("Directory not empty" on a locked `node_modules`), in a `.claude\worktrees` or next
+to the repositories when named like a worktree of one (`<repo>-<name>`). It looks for those in
+the folder this repo is in, or the one given with `-ReposDir`. Run it from the checkout
+`install.ps1` linked; from a worktree it checks that worktree instead and says so. Exit code 1
+means something needs a look.
 
 ## Uninstall
 

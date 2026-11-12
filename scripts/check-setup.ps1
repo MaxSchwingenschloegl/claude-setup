@@ -14,8 +14,10 @@
       are gone and the home folder marked (README, "Things to know").
     - Worktrees: registered worktrees whose folder is gone (`git worktree prune` removes the
       entry), and folders a failed `git worktree remove` left behind ("Directory not empty",
-      locked node_modules): a folder next to the repositories, or in the .claude\worktrees of a
-      repository or worktree, that is no repository and no worktree git knows.
+      locked node_modules): a folder in the .claude\worktrees of a repository or worktree, or
+      one next to the repositories named like a worktree of one of them (<repo>-<name>), that
+      is no repository and no worktree git knows; and any folder whose .git file points to a
+      worktree entry that is gone.
     Run it from the checkout install.ps1 linked: from a worktree it checks that worktree instead
     (and says so). It changes nothing but what `git fetch` writes.
     Exit code 1 when something needs a look, 0 when nothing does.
@@ -54,8 +56,9 @@ function Note([string]$Text) { Write-Host $Text -ForegroundColor Cyan }
 
 # git's output; its errors are dropped and leave $LASTEXITCODE set, so a repository git cannot
 # read is reported instead of stopping the check. git writes UTF-8, which Windows PowerShell
-# would read in the console's code page (a path with an umlaut would then match nothing), and
-# without optional locks `git status` leaves the index as it is.
+# would read in the console's code page (a path with an umlaut would then match nothing),
+# core.quotePath=false keeps such a path readable in `git status`, and without optional locks
+# `git status` leaves the index as it is.
 function Invoke-Git([string]$Repo) {
     $ErrorActionPreference = 'Continue'
     $encoding = [Console]::OutputEncoding
@@ -63,7 +66,7 @@ function Invoke-Git([string]$Repo) {
     try {
         [Console]::OutputEncoding = [Text.Encoding]::UTF8
         $env:GIT_OPTIONAL_LOCKS = '0'
-        & git -C $Repo @args 2> $null
+        & git -c core.quotePath=false -C $Repo @args 2> $null
     } finally {
         [Console]::OutputEncoding = $encoding
         $env:GIT_OPTIONAL_LOCKS = $locks
@@ -191,19 +194,32 @@ foreach ($repo in $repoDirs) {
     }
 }
 # Next to the repositories, and in the .claude\worktrees of each repository and worktree (a
-# session in a worktree puts its own worktrees there)
-$candidates = @(Get-ChildItem -LiteralPath $ReposDir -Directory -Force | Where-Object { $_.Name -notlike '.*' })
+# session in a worktree puts its own worktrees there). Next to them a folder without git counts
+# only when it is named like a worktree of one of them (<repo>-<name>): a folder of notes or a
+# bare repository there is none. The setup's own folders are checked above.
+$setup = @(@($L.Root, $L.Config) + $L.Marketplaces | ForEach-Object { (Get-ClaudeFullPath $_).ToLowerInvariant() })
+$prefixes = @($repoDirs | ForEach-Object { "$($_.Name)-" })
+$candidates = @(Get-ChildItem -LiteralPath $ReposDir -Directory -Force | Where-Object { $_.Name -notlike '.*' } |
+                ForEach-Object { [pscustomobject]@{ Folder = $_; Inside = $false } })
 foreach ($path in $present) {
-    $candidates += @(Get-ChildItem -LiteralPath (Join-Path $path '.claude\worktrees') -Directory -Force -ErrorAction SilentlyContinue)
+    $candidates += @(Get-ChildItem -LiteralPath (Join-Path $path '.claude\worktrees') -Directory -Force -ErrorAction SilentlyContinue |
+                     ForEach-Object { [pscustomobject]@{ Folder = $_; Inside = $true } })
 }
-foreach ($folder in $candidates) {
-    if ($folder.LinkType -or $registered.Contains($folder.FullName.ToLowerInvariant())) { continue }
+foreach ($candidate in $candidates) {
+    $folder = $candidate.Folder
+    $full = $folder.FullName.ToLowerInvariant()
+    if ($folder.LinkType -or $registered.Contains($full) -or $setup -contains $full) { continue }
     $dotGit = Join-Path $folder.FullName '.git'
     if (Test-Path -LiteralPath $dotGit -PathType Container) { continue }
     if (Test-Path -LiteralPath $dotGit -PathType Leaf) {
         # A worktree of a repository elsewhere still points to its entry there
         $line = Get-Content -LiteralPath $dotGit -TotalCount 1 -Encoding UTF8
         if ($line -match '^gitdir:\s*(.+)$' -and (Test-Path -LiteralPath $matches[1].Trim())) { continue }
+    } elseif (-not $candidate.Inside) {
+        $named = @($prefixes | Where-Object { $folder.Name.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) }).Count
+        $bare = (Test-Path -LiteralPath (Join-Path $folder.FullName 'HEAD') -PathType Leaf) -and
+                (Test-Path -LiteralPath (Join-Path $folder.FullName 'objects') -PathType Container)
+        if (-not $named -or $bare) { continue }
     }
     Report "$($folder.FullName) is no repository and no worktree git knows: probably what a failed git worktree remove left behind. Make sure it holds nothing you need, then delete it."
 }
