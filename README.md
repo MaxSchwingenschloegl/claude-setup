@@ -339,6 +339,22 @@ newer Roslyn. `install.ps1` checks the plugin's start script, not the `csharp-ls
   `bash -c`, `cmd /c`, `powershell -c`, `xargs`, in backquotes and in `find -exec`; the text of a
   here-document or a message is not a command, unless a shell reads it (`bash <<'EOF'`). Tests:
   `bash hooks/block-profile-wide-search.test.sh`.
+- `hooks/block-denied-reads.sh` is a PreToolUse hook for Bash and PowerShell that carries your
+  `Read(...)` deny rules over to the shell commands Claude Code's own check lets through. Claude
+  Code (measured with 2.1.322) already refuses `cat`, `head`, `grep`, `cp`, `ls` and the like on a
+  denied path, and its Grep and Glob tools leave denied files out, but it ran a glob
+  (`cat notes/*/x`), a recursive search over the folder above a denied one (`grep -r`, `rg`),
+  `less`, `xargs cat`, `bash -c`, `python -c` and `powershell -Command`, and those read the file.
+  The hook needs no configuration: it reads the rules from your user settings and the project's
+  `.claude/settings.json` and `settings.local.json`. It never lists a folder or opens a file, so
+  an online-only folder of a sync client is never downloaded: a glob is compared with the rules
+  part by part instead of being expanded, and for a search it asks only whether the rule's folder
+  lies straight in the searched one (one check of a fixed path), so a search two levels above a
+  denied folder is not seen. It refuses only reading programs, so a project's own tool that takes
+  such a path (`uv run mytool import <recording>`) still runs. A rule naming files (`.env`, `*.pem`) counts for
+  paths and globs but not for searches, or `grep -r` in any repository with a `.env` would stop;
+  `block-secrets.sh` guards those names. It reads names and folders, never a file's content; its
+  header lists what it does not cover. Tests: `bash hooks/block-denied-reads.test.sh`.
 - `hooks/guard-git.sh` is a PreToolUse hook for Bash and PowerShell that blocks git and gh
   commands the git rules forbid: AI attribution (Co-Authored-By naming Claude, Claude-Session,
   "Generated with Claude Code", a Claude author) in commit, merge, tag and note messages, pull
@@ -374,15 +390,17 @@ newer Roslyn. `install.ps1` checks the plugin's start script, not the `csharp-ls
   configuration are stricter where they say so: with `Bash(ssh *)` denied, `ssh -T
   git@github.com` is still refused by the settings, although the hook lets it through. Tests:
   `bash hooks/block-remote-access.test.sh`.
-- The three and the search guard share `hooks/lib/command-segments.sh`, which splits a command
-  line in time linear in its length (a 60 KB command takes one to two seconds in Git Bash). If the
-  library is missing or broken, each of the four blocks every call it would check with a message
+- The three, the search guard and the read guard share `hooks/lib/command-segments.sh`, which
+  splits a command line in time linear in its length (a 60 KB command takes one to two seconds in
+  Git Bash). If the library is missing or broken, each of the five blocks every call it would
+  check with a message
   saying so, rather than letting commands through unchecked; restore the folder (`git checkout`,
   then `install.ps1`). Register
   each for the matcher `Bash|PowerShell` in your configuration's `settings.json`, like the two
   above. That matcher covers the Monitor tool too: Claude Code hands a Monitor call to every hook
   matched on `Bash` as a Bash call with the same command (measured with Claude Code 2.1.321), so
-  the shell hooks need no `Monitor` matcher. The templates register the commit secret scan (both) and the git guard (`recommended`,
+  the shell hooks need no `Monitor` matcher. The templates register the commit secret scan and
+  the read guard (both) and the git guard (`recommended`,
   which also turns attribution off). Neither registers the remote-access guard: refusing every
   server is a personal policy, so add it yourself if it is yours.
 - `statusline/statusline.sh` shows the account, the model, `⦿ remote` while Remote Control is

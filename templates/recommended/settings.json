@@ -67,6 +67,17 @@
         "hooks": [
           {
             "type": "command",
+            "command": "bash ~/.claude/hooks/block-denied-reads.sh",
+            "shell": "bash",
+            "timeout": 30
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
             "command": "bash ~/.claude/hooks/guard-git.sh",
             "shell": "bash",
             "timeout": 30
