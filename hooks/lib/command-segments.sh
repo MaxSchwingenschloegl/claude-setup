@@ -1,5 +1,5 @@
-# Sourced by guard-git.sh, block-commit-secrets.sh, block-remote-access.sh and
-# block-profile-wide-search.sh; not a hook itself.
+# Sourced by guard-git.sh, block-commit-secrets.sh, block-remote-access.sh,
+# block-profile-wide-search.sh and block-denied-reads.sh; not a hook itself.
 # Splits a shell command line into simple commands, so that a guard looks only at the program at
 # command position and its arguments. Text inside a quoted message or a here-document is never
 # taken for a command: a `gh issue comment` whose body mentions `git push origin main`, or a
@@ -787,4 +787,112 @@ commit_parse() {
             *) COMMIT_SPECS+=("$a") ;;
         esac
     done
+}
+
+# Options that take a value, per search tool, between blanks: a flag of one tool is such an option
+# of another (tree -d lists folders, du -d takes a depth)
+declare -A CS_SEARCH_VALUE_OPTS=(
+    [grep]=' -e -f -m -A -B -C -d -D --regexp --file --max-count --exclude --include --exclude-dir --exclude-from --label --binary-files --devices --directories --context --after-context --before-context '
+    [rg]=' -e -f -g -t -T -m -A -B -C -d -j -r -M -E --regexp --file --glob --iglob --type --type-not --type-add --max-count --max-depth --maxdepth --threads --replace --max-columns --encoding --pre --ignore-file --sort --sortr --max-filesize --context --after-context --before-context '
+    [ag]=' -A -B -C -G -g -m -p --depth --ignore --ignore-dir --file-search-regex --max-count --path-to-ignore --context --after --before --pager '
+    [ack]=' -A -B -C -g -m --type --ignore-dir --ignore-file --match --max-count --output --context --after-context --before-context '
+    [fd]=' -e -t -d -E -S -j -c -o --extension --type --max-depth --min-depth --exact-depth --exclude --size --threads --color --owner --changed-within --changed-before --base-directory --max-results --ignore-file --format '
+    [tree]=' -L -P -I -o -H -T --filelimit --charset --sort --timefmt '
+    [du]=' -d -B -t -X --max-depth --block-size --threshold --exclude --exclude-from --time-style --files0-from '
+    [ls]=' -I -w -T --ignore --hide --width --tabsize --sort --format --block-size --time-style --time --quoting-style --indicator-style '
+)
+CS_SEARCH_TOOLS='find du tree rg ag ack fd fdfind grep egrep fgrep ls get-childitem gci dir'
+
+# For a search tool (one of CS_SEARCH_TOOLS) at words[at]: SEARCH_PATHS (the paths it names,
+# read in bash with their escapes, so \( is the word ( and ~/Team\ Files one folder; the pattern of
+# grep, rg, ag and ack and the values of options are none) and SEARCH_RECURSIVE (1 when it
+# descends into folders: find, du, tree, rg, ag, ack and
+# fd always, grep with -r/-R/--recursive/-d recurse, ls with -R, Get-ChildItem/gci and PowerShell's
+# ls and dir with -Recurse or -Depth, dir /s in cmd). False when it searches nothing here: it only
+# prints its version or help, or it is find in cmd or PowerShell, where find is the Windows FIND,
+# a text search.
+search_args() {
+    local k i=1 t=$prog b=$prog n l skip_pattern=0 ps=0 vals
+    local -a w=()
+    SEARCH_PATHS=()
+    SEARCH_RECURSIVE=0
+    [[ $t == find && $sh != bash ]] && return 1
+    # PowerShell's ls and dir are Get-ChildItem, whose options have no case
+    [[ $t == get-childitem || $t == gci || ($sh == powershell && ($t == ls || $t == dir)) ]] && ps=1
+    for ((k = at; k < ${#words[@]}; k++)); do
+        if [[ $sh == bash && -n ${seg_raw[k]+x} ]]; then
+            cs_unescape "${seg_raw[k]}"
+            w+=("$REPLY")
+        else
+            w+=("${words[k]}")
+        fi
+    done
+    case $t in
+        egrep | fgrep) b=grep ;;
+        fdfind) b=fd ;;
+        dir) b=ls ;;
+    esac
+    vals=${CS_SEARCH_VALUE_OPTS[$b]-}
+    case $b in
+        find | du | tree) SEARCH_RECURSIVE=1 ;;
+        rg | ag | ack | fd) SEARCH_RECURSIVE=1; skip_pattern=1 ;;
+        grep) skip_pattern=1 ;;
+    esac
+    while ((i < ${#w[@]})); do
+        n=${w[i]}
+        l=${n,,}
+        if ((ps)); then
+            # Parameters may be cut short (-inc, -rec); -s is an alias of -Recurse
+            case $l in
+                -fi | -fil | -filt* | -inc* | -exc*) ((i += 2)); continue ;;
+                -dep*) SEARCH_RECURSIVE=1; ((i += 2)); continue ;;
+                -pa* | -li*) SEARCH_PATHS+=("${w[i+1]}"); ((i += 2)); continue ;;
+                -r | -re | -rec* | -s) SEARCH_RECURSIVE=1 ;;
+                -*) ;;
+                *) SEARCH_PATHS+=("$n") ;;
+            esac
+            ((i++))
+            continue
+        fi
+        if [[ $sh == cmd && $n == /* ]]; then
+            # cmd's options, also glued (dir /s /b, dir /b/s); its paths never start with /
+            [[ /$l/ == *'/s/'* ]] && SEARCH_RECURSIVE=1
+            ((i++))
+            continue
+        fi
+        # fd -x runs a command on each result: the rest is that command
+        [[ $b == fd && ($n == -x || $n == -X || $n == --exec || $n == --exec-batch) ]] && break
+        if [[ $t == find ]]; then
+            # Options before the starting points; the first other dash word opens the expression
+            case $n in
+                -H | -L | -P | -O* | -D | --) [[ $n == -D ]] && ((i++)); ((i++)); continue ;;
+                -* | '(' | '!') break ;;
+            esac
+        fi
+        case $n in
+            --version | --help | -V) return 1 ;;
+            --files) skip_pattern=0 ;;
+            --recursive | --dereference-recursive) SEARCH_RECURSIVE=1 ;;
+            --search-path) SEARCH_PATHS+=("${w[i+1]}"); ((i += 2)); continue ;;
+            -*)
+                if [[ $vals == *" $n "* ]]; then
+                    # The pattern comes as this value, so the next word is a path
+                    case $b:$n in
+                        grep:-e | grep:-f | grep:--regexp | grep:--file | rg:-e | rg:-f | rg:--regexp | rg:--file | ag:-g | ack:-g) skip_pattern=0 ;;
+                    esac
+                    [[ $b == grep && $n == -d && ${w[i+1]} == recurse ]] && SEARCH_RECURSIVE=1
+                    ((i += 2))
+                    continue
+                fi
+                # ack -f lists the files, with no pattern. Case matters: ls -r sorts in reverse
+                [[ $b == ack && $n == -f ]] && skip_pattern=0
+                [[ $b == grep && $n =~ ^-[[:alnum:]]*[rR] ]] && SEARCH_RECURSIVE=1
+                [[ $b == ls && $n =~ ^-[[:alnum:]]*R ]] && SEARCH_RECURSIVE=1
+                ;;
+            *)
+                if ((skip_pattern)); then skip_pattern=0; else SEARCH_PATHS+=("$n"); fi ;;
+        esac
+        ((i++))
+    done
+    return 0
 }

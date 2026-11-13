@@ -197,114 +197,20 @@ if [[ $tool == Grep || $tool == Glob ]]; then
     exit 0
 fi
 
-# Options that take a value, per tool, between blanks: a flag of one tool is such an option of
-# another (tree -d lists folders, du -d takes a depth)
-declare -A value_opts=(
-    [grep]=' -e -f -m -A -B -C -d -D --regexp --file --max-count --exclude --include --exclude-dir --exclude-from --label --binary-files --devices --directories --context --after-context --before-context '
-    [rg]=' -e -f -g -t -T -m -A -B -C -d -j -r -M -E --regexp --file --glob --iglob --type --type-not --type-add --max-count --max-depth --maxdepth --threads --replace --max-columns --encoding --pre --ignore-file --sort --sortr --max-filesize --context --after-context --before-context '
-    [ag]=' -A -B -C -G -g -m -p --depth --ignore --ignore-dir --file-search-regex --max-count --path-to-ignore --context --after --before --pager '
-    [ack]=' -A -B -C -g -m --type --ignore-dir --ignore-file --match --max-count --output --context --after-context --before-context '
-    [fd]=' -e -t -d -E -S -j -c -o --extension --type --max-depth --min-depth --exact-depth --exclude --size --threads --color --owner --changed-within --changed-before --base-directory --max-results --ignore-file --format '
-    [tree]=' -L -P -I -o -H -T --filelimit --charset --sort --timefmt '
-    [du]=' -d -B -t -X --max-depth --block-size --threshold --exclude --exclude-from --time-style --files0-from '
-    [ls]=' -I -w -T --ignore --hide --width --tabsize --sort --format --block-size --time-style --time --quoting-style --indicator-style '
-)
-
 # Handler for a search tool (CS_PROGRAMS): words, at, prog, sh, seg_raw and CS_CWD come from
-# split_command. In bash each word is read with its escapes, so \( is the word ( rather than a
-# word \, which would read as the drive root, and ~/Team\ Files is one folder.
+# split_command, the paths and whether it recurses from search_args in the library.
 check_search() {
-    local -a w=() paths=()
-    local k i=1 t=$prog b=$prog n l skip_pattern=0 recursive=0 ps=0 p vals
-    # In cmd and PowerShell, find is the Windows FIND, which searches text and not folders
-    [[ $t == find && $sh != bash ]] && return
-    # PowerShell's ls and dir are Get-ChildItem, whose options have no case
-    [[ $t == get-childitem || $t == gci || ($sh == powershell && ($t == ls || $t == dir)) ]] && ps=1
-    for ((k = at; k < ${#words[@]}; k++)); do
-        if [[ $sh == bash && -n ${seg_raw[k]+x} ]]; then
-            cs_unescape "${seg_raw[k]}"
-            w+=("$REPLY")
-        else
-            w+=("${words[k]}")
-        fi
-    done
+    local p
+    search_args || return
+    ((SEARCH_RECURSIVE)) || return
     cwd=/
     norm "$CS_CWD"
     cwd=$REPLY
-    case $t in
-        egrep | fgrep) b=grep ;;
-        fdfind) b=fd ;;
-        dir) b=ls ;;
-    esac
-    vals=${value_opts[$b]-}
-    case $b in
-        find | du | tree) recursive=1 ;;
-        rg | ag | ack | fd) recursive=1; skip_pattern=1 ;;
-        grep) skip_pattern=1 ;;
-    esac
-    while ((i < ${#w[@]})); do
-        n=${w[i]}
-        l=${n,,}
-        if ((ps)); then
-            # Parameters may be cut short (-inc, -rec); -s is an alias of -Recurse
-            case $l in
-                -fi | -fil | -filt* | -inc* | -exc*) ((i += 2)); continue ;;
-                -dep*) recursive=1; ((i += 2)); continue ;;
-                -pa* | -li*) paths+=("${w[i+1]}"); ((i += 2)); continue ;;
-                -r | -re | -rec* | -s) recursive=1 ;;
-                -*) ;;
-                *) paths+=("$n") ;;
-            esac
-            ((i++))
-            continue
-        fi
-        if [[ $sh == cmd && $n == /* ]]; then
-            # cmd's options, also glued (dir /s /b, dir /b/s); its paths never start with /
-            [[ /$l/ == *'/s/'* ]] && recursive=1
-            ((i++))
-            continue
-        fi
-        # fd -x runs a command on each result: the rest is that command
-        [[ $b == fd && ($n == -x || $n == -X || $n == --exec || $n == --exec-batch) ]] && break
-        if [[ $t == find ]]; then
-            # Options before the starting points; the first other dash word opens the expression
-            case $n in
-                -H | -L | -P | -O* | -D | --) [[ $n == -D ]] && ((i++)); ((i++)); continue ;;
-                -* | '(' | '!') break ;;
-            esac
-        fi
-        case $n in
-            --version | --help | -V) return ;;
-            --files) skip_pattern=0 ;;
-            --recursive | --dereference-recursive) recursive=1 ;;
-            --search-path) paths+=("${w[i+1]}"); ((i += 2)); continue ;;
-            -*)
-                if [[ $vals == *" $n "* ]]; then
-                    # The pattern comes as this value, so the next word is a path
-                    case $b:$n in
-                        grep:-e | grep:-f | grep:--regexp | grep:--file | rg:-e | rg:-f | rg:--regexp | rg:--file | ag:-g | ack:-g) skip_pattern=0 ;;
-                    esac
-                    [[ $b == grep && $n == -d && ${w[i+1]} == recurse ]] && recursive=1
-                    ((i += 2))
-                    continue
-                fi
-                # ack -f lists the files, with no pattern. Case matters: ls -r sorts in reverse
-                [[ $b == ack && $n == -f ]] && skip_pattern=0
-                [[ $b == grep && $n =~ ^-[[:alnum:]]*[rR] ]] && recursive=1
-                [[ $b == ls && $n =~ ^-[[:alnum:]]*R ]] && recursive=1
-                ;;
-            *)
-                if ((skip_pattern)); then skip_pattern=0; else paths+=("$n"); fi ;;
-        esac
-        ((i++))
+    ((${#SEARCH_PATHS[@]})) || SEARCH_PATHS=(.)
+    for p in "${SEARCH_PATHS[@]}"; do
+        guarded "$p"
+        [[ -n $REPLY ]] && block "$REPLY"
     done
-    if ((recursive)); then
-        ((${#paths[@]})) || paths=(.)
-        for p in "${paths[@]}"; do
-            guarded "$p"
-            [[ -n $REPLY ]] && block "$REPLY"
-        done
-    fi
 }
 
 # Handler for a shell: the here-document it reads is a script (bash <<'EOF'), read as a command
