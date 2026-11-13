@@ -318,13 +318,20 @@ newer Roslyn. `install.ps1` checks the plugin's start script, not the `csharp-ls
 ## Secret guard, status line, privacy
 
 - `hooks/block-secrets.sh` is a PreToolUse hook that blocks Read, Grep, Bash and PowerShell calls
-  reaching `.env` files (not `.env.example`), private keys and login files. Permission deny rules
-  alone do not reach shell commands. It reads the whole command text, so a shell command that
-  merely mentions such a file name (a commit message, a heredoc) is blocked too; write such text
-  with the file tools. It is a guard against accidents, not against a determined attacker; its
-  header lists what it does not cover. If its script cannot be found (this repo moved without
-  running `install.ps1` again), Claude Code shows a hook error and the call goes through, so
-  move the repo only together with a new install run. Tests: `bash hooks/block-secrets.test.sh`.
+  reaching `.env` files (not the placeholders `.env.example`, `.env.sample`, `.env.template`,
+  `.env.dist`, and only under exactly that name), private keys and login files. Permission deny
+  rules reach shell commands only as far as `block-denied-reads.sh` (below) carries them over. A
+  deny rule knows no exception, so the templates' `Read` rules list the usual names
+  (`.env.local`, `.env.production`, `.env.prod`, `.env.keys`, backups, ...) instead of `.env.*`,
+  which would hide the placeholders from the Read tool too. A name outside that list is still
+  blocked by the hook when a call names it, but the Grep tool searching a whole folder reads it
+  unless git ignores it (the hook sees the folder, not its files). The hook reads the whole
+  command text, so a shell command that merely mentions such a file name (a commit message, a
+  heredoc) is blocked too; write such text with the file tools. It is a guard against accidents,
+  not against a determined attacker; its header lists what it does not cover. If its script
+  cannot be found (this repo moved without running `install.ps1` again), Claude Code shows a hook
+  error and the call goes through, so move the repo only together with a new install run. Tests:
+  `bash hooks/block-secrets.test.sh`.
 - `hooks/block-profile-wide-search.sh` is a PreToolUse hook that blocks a recursive search (`find`,
   `grep -r`, `rg`, `ls -R`, `du`, `tree`, `Get-ChildItem -Recurse`, the Grep and Glob tools) over
   the user profile, anything above it, or a cloud-synced folder, starting in one or above one. A
