@@ -359,8 +359,9 @@ mkcommit aisubject "$generated"
 GIT_AUTHOR_NAME=Claude GIT_AUTHOR_EMAIL=noreply@anthropic.com mkcommit aiauthor "Fix the parser"
 GIT_AUTHOR_NAME=Claude GIT_AUTHOR_EMAIL=claude@anthropic.com mkcommit aiant "Fix the parser"
 GIT_AUTHOR_NAME="Claude Code" GIT_AUTHOR_EMAIL=claude@users.noreply.github.com mkcommit aigh "Fix the parser"
-git -C "$real" update-ref refs/heads/main "$(git -C "$real" rev-parse ai)"
-git -C "$real" symbolic-ref HEAD refs/heads/main
+# on a branch, so these cases test the message and the author, not the commit on main
+git -C "$real" update-ref refs/heads/work "$(git -C "$real" rev-parse ai)"
+git -C "$real" symbolic-ref HEAD refs/heads/work
 realw=$(cygpath -w "$real")
 check 2 Bash 'git commit -C ai' "$realw"
 check 2 Bash 'git commit -c ai' "$realw"
@@ -396,8 +397,8 @@ check 0 Bash 'git commit --author "Max Example <max@example.org>" -m x'
 realc=$tmp/realc
 git init -q "$realc"
 c=$(printf 'Fix the parser\n' | GIT_AUTHOR_NAME=Claude GIT_AUTHOR_EMAIL=noreply@anthropic.com git -C "$realc" commit-tree "$(git -C "$realc" mktree < /dev/null)")
-git -C "$realc" update-ref refs/heads/main "$c"
-git -C "$realc" symbolic-ref HEAD refs/heads/main
+git -C "$realc" update-ref refs/heads/work "$c"
+git -C "$realc" symbolic-ref HEAD refs/heads/work
 realcw=$(cygpath -w "$realc")
 check 2 Bash 'git commit --amend -m "Fix it"' "$realcw"
 check 2 Bash 'git commit --amend --no-edit' "$realcw"
@@ -423,9 +424,8 @@ check 0 Bash 'git commit -C ai'
 
 # The reason fits the push: a rewrite is answered with the merge path, deleting main or
 # --mirror is the user's decision
-says() {  # text the reason must hold, command
-    local value=$2 cwd json err
-    cwd=$(cygpath -w "$repo")
+says() {  # text the reason must hold, command[, cwd]
+    local value=$2 cwd=${3:-$(cygpath -w "$repo")} json err
     cwd=${cwd//\\/\\\\}
     json="{\"session_id\":\"t\",\"cwd\":\"$cwd\",\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$value\"}}"
     err=$(printf '%s' "$json" | bash "$hook" 2>&1 >/dev/null)
@@ -445,6 +445,228 @@ says "the user's decision" 'git push --force --delete origin main'
 says "the user's decision" 'git push --delete origin +main'
 says 'never rewritten' 'git push --delete origin +feature'
 check 0 Bash 'git push origin --delete feature'
+
+# No commit on main: a repository whose HEAD names main, one on a branch, a linked worktree (its
+# .git file names an absolute gitdir), a worktree on main (a relative gitdir) and a detached HEAD.
+# HEAD is read as a file; the repository above has none, so its cases do not depend on a branch.
+onmain=$tmp/onmain
+onfeat=$tmp/onfeat
+mkdir -p "$onmain/.git/worktrees/wt" "$onmain/.git/worktrees/wtmain" "$onmain/sub" "$onfeat/.git" \
+    "$tmp/wt" "$tmp/wtmain" "$tmp/detached/.git"
+printf 'ref: refs/heads/main\n' > "$onmain/.git/HEAD"
+mkdir -p "$onmain/.git/refs/heads"
+printf '0123456789abcdef0123456789abcdef01234567\n' > "$onmain/.git/refs/heads/main"   # main is born
+: > "$onmain/a.py"
+printf 'ref: refs/heads/feat/x\n' > "$onfeat/.git/HEAD"
+printf 'ref: refs/heads/feat/wt\n' > "$onmain/.git/worktrees/wt/HEAD"
+printf 'ref: refs/heads/main\n' > "$onmain/.git/worktrees/wtmain/HEAD"
+printf 'gitdir: %s/.git/worktrees/wt\n' "$(cygpath -m "$onmain")" > "$tmp/wt/.git"
+printf 'gitdir: ../onmain/.git/worktrees/wtmain\r\n' > "$tmp/wtmain/.git"
+printf '0123456789abcdef0123456789abcdef01234567\n' > "$tmp/detached/.git/HEAD"
+mkdir -p "$tmp/nonl/.git"
+printf 'ref: refs/heads/main' > "$tmp/nonl/.git/HEAD"   # written without a closing line break
+printf '# pack-refs with: peeled fully-peeled sorted\n0123456789abcdef0123456789abcdef01234567 refs/heads/main\n' > "$tmp/nonl/.git/packed-refs"
+check 2 Bash 'git commit -m x' "$(cygpath -w "$tmp/nonl")"
+m=$(cygpath -w "$onmain")
+f=$(cygpath -w "$onfeat")
+fm=$(cygpath -m "$onfeat")
+mm=$(cygpath -m "$onmain")
+check 2 Bash 'git commit -m x' "$m"
+check 2 Bash 'git commit -m x' "$m\\sub"
+check 2 Bash 'git add a.py && git commit -m "Fix the parser"' "$m"
+check 2 Bash 'git commit --amend --no-edit' "$m"
+check 2 Bash 'git cherry-pick abc123' "$m"
+check 2 Bash 'git cherry-pick --continue' "$m"
+check 2 Bash 'git revert HEAD' "$m"
+check 2 Bash 'git am fix.patch' "$m"
+check 2 Bash 'git merge feature' "$m"
+check 2 Bash 'git merge --no-ff feature' "$m"
+check 2 Bash 'git merge --ff feature' "$m"
+check 2 Bash 'git pull' "$m"
+check 2 Bash 'git pull --rebase origin main' "$m"
+check 2 Bash "git -C $mm commit -m x" "$f"
+check 2 Bash "git -C \"$m\" commit -m x" "$f"
+check 2 Bash "cd $mm && git commit -m x" "$f"
+check 2 Bash "cd $mm/sub && git commit -m x" "$f"
+check 2 Bash 'bash -c "git commit -m x"' "$m"
+check 2 Bash 'git commit -m x' "$(cygpath -w "$tmp/wtmain")"
+check 2 Bash 'git checkout main && git commit -m x' "$f"
+check 2 Bash 'git switch feat/y && git switch main && git commit -m x' "$m"
+check 2 Bash 'git checkout -b feat/y && git checkout main && git merge feat/y' "$m"
+check 2 PowerShell 'git commit -m x' "$m"
+check 2 PowerShell "Set-Location '$m'; git commit -m x" "$f"
+check 2 PowerShell 'git switch feat/y; git switch main; git commit -m x' "$m"
+says 'git switch -c' 'git commit -m x' "$m"
+says 'pull --ff-only' 'git pull' "$m"
+# An exemption counts as a word of its own, never inside a message
+check 2 Bash 'git commit -m "Handle --abort in the parser"' "$m"
+check 2 Bash 'git merge feature -m "keep --ff-only out"' "$m"
+check 2 Bash 'git merge feature -- --ff-only' "$m"
+# A path is no branch: git checkout . or of a file or folder that exists stays on main
+check 2 Bash 'git checkout . && git commit -m x' "$m"
+check 2 Bash 'git checkout a.py && git commit -m x' "$m"
+check 2 Bash 'git checkout sub && git commit -m x' "$m"
+# The forms that write a commit stay blocked: -n of merge is --no-stat
+check 2 Bash 'git merge -n feature' "$m"
+# git checkout <tree-ish> <path> takes files from a commit and stays on the branch
+check 2 Bash 'git checkout HEAD a.py && git commit -m x' "$m"
+check 2 Bash 'git checkout HEAD . && git commit -m x' "$m"
+check 2 Bash 'git checkout feat/x a.py && git commit -m x' "$m"
+# A switch in a folder that does not exist yet does not move the repository above it
+check 2 Bash 'git -C nosuch checkout -b feat && git commit -m x' "$m"
+check 2 Bash 'git clone https://example.org/y.git y && git -C y switch -c feat && git commit -m x' "$m"
+# The same repository spelled another way is the same repository
+check 2 Bash "git -C ./ checkout main && git merge feature" "$f"
+check 2 Bash "git -C ${fm^^} checkout main && git -C $fm merge feature" "$m"
+# Born once anything was committed: a ref log is enough
+mkdir -p "$tmp/logged/.git/logs"
+printf 'ref: refs/heads/main\n' > "$tmp/logged/.git/HEAD"
+: > "$tmp/logged/.git/logs/HEAD"
+check 2 Bash 'git commit -m x' "$(cygpath -w "$tmp/logged")"
+# A rebase on main rewrites it like a pull --rebase
+check 2 Bash 'git rebase origin/main' "$m"
+check 2 Bash 'git rebase -i HEAD~3' "$m"
+# A fresh repository: main is born only once its ref exists, loose or packed
+mkdir -p "$tmp/fresh/.git/refs/heads"
+printf 'ref: refs/heads/main\n' > "$tmp/fresh/.git/HEAD"
+check 0 Bash 'git add README.md && git commit -m "Initial commit"' "$(cygpath -w "$tmp/fresh")"
+check 0 Bash 'git commit -m "Initial commit"' "$(cygpath -w "$tmp/fresh")"
+# The same commands on a branch, in a worktree on one, detached, or with main brought up to date
+check 0 Bash 'git commit -m x' "$f"
+check 0 Bash 'git commit -m x' "$(cygpath -w "$tmp/wt")"
+check 0 Bash 'git commit -m x' "$(cygpath -w "$tmp/detached")"
+check 0 Bash 'git merge feature' "$f"
+check 0 Bash 'git pull' "$f"
+check 0 Bash 'git cherry-pick abc123' "$f"
+check 0 Bash 'git status && git log --oneline -3 && git diff' "$m"
+check 0 Bash 'git merge --ff-only origin/main' "$m"
+check 0 Bash 'git pull --ff-only' "$m"
+check 0 Bash 'git merge --abort' "$m"
+check 0 Bash 'git merge --quit' "$m"
+check 0 Bash 'git cherry-pick --abort' "$m"
+check 0 Bash 'git revert --quit' "$m"
+check 0 Bash 'git am --abort' "$m"
+check 0 Bash 'git switch -c feat/y && git add a.py && git commit -m x' "$m"
+check 0 Bash 'git checkout -b feat/y && git commit -m x' "$m"
+check 0 Bash 'git checkout -B feat/y origin/main && git commit -m x' "$m"
+check 0 Bash 'git switch --create feat/y && git commit -m x' "$m"
+check 0 Bash 'git switch -c feat/y main && git commit -m x' "$m"
+check 0 Bash 'git checkout -- a.py && git checkout feat/x && git commit -m x' "$m"
+check 2 Bash 'git checkout feat/x -- a.py && git commit -m x' "$m"
+check 0 Bash 'git switch feat/x && git commit -m x' "$m"
+check 0 Bash 'git checkout --detach && git commit -m x' "$m"
+check 0 Bash 'git switch --detach main && git commit -m x' "$m"
+check 0 Bash 'git checkout -b feat/y main && git commit -m x' "$m"
+check 0 Bash 'git switch --create=feat/y && git commit -m x' "$m"
+check 0 Bash "git -C $fm commit -m x" "$m"
+check 0 Bash "cd $fm && git commit -m x" "$m"
+check 0 Bash 'git -C sub log' "$m"
+check 0 Bash 'echo "git commit -m x" && grep -r "git merge feature" .' "$m"
+check 0 Bash 'gh pr create --title "Fix the parser" --body "git commit on main"' "$m"
+check 0 PowerShell 'git switch -c feat/y; git commit -m x' "$m"
+check 0 PowerShell "Set-Location '$f'; git commit -m x" "$m"
+# The forms of these verbs that write no commit
+check 0 Bash 'git cherry-pick -n abc123' "$m"
+check 0 Bash 'git cherry-pick --no-commit abc123' "$m"
+check 0 Bash 'git revert -n HEAD' "$m"
+check 0 Bash 'git merge --squash feature' "$m"
+check 0 Bash 'git merge --no-commit feature' "$m"
+check 0 Bash 'git commit --dry-run' "$m"
+check 0 Bash 'git commit -h' "$m"
+check 0 Bash 'git merge --help' "$m"
+check 0 Bash 'git am --show-current-patch' "$m"
+check 0 Bash 'git am --show-current-patch=diff' "$m"
+# A branch name glued to its flag, and a folder made on the same line (a new worktree inside the
+# repository), where the command runs later and git reads that folder's HEAD
+check 0 Bash 'git checkout -bfeat/y && git commit -m x' "$m"
+check 0 Bash 'git switch -cfeat/y && git commit -m x' "$m"
+check 0 Bash 'git worktree add .worktrees/x -b x && cd .worktrees/x && git commit -m x' "$m"
+# Any other folder that does not exist yet belongs to the repository above it; git fails there
+# anyway, so refusing costs nothing
+check 2 Bash 'git -C no-such-folder commit -m x' "$m"
+check 0 Bash 'git checkout feat/x && git commit -m x' "$m"
+# The word after -b, -B or --orphan is a new branch even when a folder has its name
+check 0 Bash 'git checkout -b sub && git commit -m x' "$m"
+check 0 Bash 'git checkout -B sub origin/main && git commit -m x' "$m"
+check 0 Bash 'git checkout --orphan sub && git commit -m x' "$m"
+check 0 Bash 'git switch -c sub && git commit -m x' "$m"
+check 0 Bash 'git -C . switch -c feat/y && git commit -m x' "$m"
+check 0 Bash 'cd sub && git switch -c feat/y && cd .. && git commit -m x' "$m"
+check 0 Bash 'git rebase --abort' "$m"
+check 0 Bash 'git rebase main' "$f"
+check 0 Bash 'git pull --dry-run' "$m"
+check 0 Bash 'git pull --no-commit origin feature' "$m"
+check 0 Bash 'git pull --squash origin feature' "$m"
+# A repository made on the same line has an unborn main, also in a folder inside one on main
+mkdir -p "$onmain/newproj"
+check 0 Bash 'cd newproj && git init && git add a.txt && git commit -m init' "$m"
+check 0 Bash 'git init newproj && git -C newproj commit -m init' "$m"
+check 2 Bash 'git init newproj && git commit -m x' "$m"
+check 0 Bash 'cd newproj && git init -b trunk && git commit -m init' "$m"
+mkdir -p "$onmain/newproj/src"
+check 0 Bash 'git init newproj && git -C newproj/src commit -m init' "$m"
+# After -- every word is a path, also one that does not exist yet
+check 2 Bash 'git checkout -- not-yet.txt && git commit -m x' "$m"
+# Found by the narrow verification after round 2
+check 2 Bash 'git checkout HEAD && git commit -m x' "$m"
+check 2 Bash 'git checkout @ && git commit -m x' "$m"
+check 2 Bash 'git switch Main && git commit -m x' "$m"
+mkdir -p "$onfeat/main"
+check 2 Bash 'git checkout main && git commit -m x' "$f"
+check 2 Bash 'mkdir newdir && cd newdir && git commit -m x' "$m"
+check 2 Bash 'mkdir -p newdir && git -C newdir commit -m x' "$m"
+check 2 Bash 'git rebase feat/x main' "$f"
+check 2 Bash 'git rebase --onto origin/main HEAD~2 main' "$f"
+check 2 Bash 'git rebase --skip' "$m"
+# The first commit makes main born: what follows on the line is judged as on main
+check 2 Bash 'git commit -m init && git commit -m second' "$(cygpath -w "$tmp/fresh")"
+check ask Bash 'git commit -m init && git push -u origin HEAD' "$(cygpath -w "$tmp/fresh")"
+check 0 Bash 'git rebase origin/main feat/x' "$m"
+check 0 Bash 'git rebase --onto origin/main HEAD~2 feat/x' "$m"
+check 0 Bash 'git rebase --edit-todo' "$m"
+check 0 Bash 'git rebase --show-current-patch' "$m"
+check 0 Bash 'git init --object-format sha256 newproj && git -C newproj commit -m init' "$m"
+check 0 Bash 'git clone https://example.org/repo.git && cd repo && git commit -m x' "$m"
+check 0 Bash 'git clone -b dev https://example.org/repo.git copy && git -C copy commit -m x' "$m"
+check 0 Bash 'git worktree add ../wt2 -b feat/z && cd ../wt2 && git commit -m x' "$m"
+# Found by the final narrow check
+check 2 Bash 'git rebase origin/main refs/heads/main' "$f"
+check 2 Bash 'git rebase --empty drop origin/main main' "$f"
+check 2 Bash 'git rebase -C 3 origin/main main' "$f"
+check 2 Bash 'git rebase origin/main Main' "$f"
+check 0 Bash 'git rebase origin/main feat/x && git commit -m x' "$m"
+mkdir -p "$onmain/sub2"
+check 2 Bash 'cd sub2 && git init --help; git commit -m x' "$m"
+check 0 Bash 'git commit --porcelain' "$m"
+check 0 Bash 'git commit --short' "$m"
+check 0 Bash 'git commit --long' "$m"
+# git init in a repository only reinitialises it: main stays born
+check 2 Bash 'git init && git commit -m x' "$m"
+# A push from main without a refspec, or of HEAD, goes to main: the same question as a push to it
+check ask Bash 'git push' "$m"
+check ask Bash 'git push origin' "$m"
+check ask Bash 'git push -u origin HEAD' "$m"
+check ask Bash 'git push origin @' "$m"
+check ask PowerShell 'git push' "$m"
+check ask Bash 'git push --all origin' "$f"
+check ask Bash 'git push --branches' "$f"
+check 0 Bash 'git push' "$f"
+check 0 Bash 'git push -u origin HEAD' "$f"
+check 0 Bash 'git push origin feat/x' "$m"
+check 0 Bash 'git switch -c feat/y && git push -u origin HEAD' "$m"
+check 0 Bash 'git push --tags origin' "$m"
+# A dry run pushes nothing, so it is not asked
+check 0 Bash 'git push --dry-run' "$m"
+check 0 Bash 'git push -n' "$m"
+check 0 Bash 'git push -nu origin HEAD' "$m"
+check 0 Bash 'git push --dry-run origin main' "$m"
+check ask Bash 'git push -u origin main' "$m"
+# The matching refspec and a wildcard over the branches push main too
+check ask Bash 'git push origin :' "$f"
+check ask Bash "git push origin 'refs/heads/*:refs/heads/*'" "$f"
+check 0 Bash "git push origin 'refs/tags/*:refs/tags/*'" "$f"
+check 0 Bash "git push origin 'refs/heads/feat/*:refs/heads/feat/*'" "$f"
+check ask Bash "git push origin 'feat\\x:refs/heads/*'" "$f"
 
 # A broken install blocks, so the gap shows, instead of letting every command through unchecked
 mkdir -p "$tmp/nolib"

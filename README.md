@@ -157,7 +157,7 @@ Run the dry run first and read it. The installer takes over what you had:
 | Transcripts kept 90 days (default 30) | yes | yes |
 | Deny rules for secret files | yes | yes |
 | Commit secret scan (`block-commit-secrets.sh`) | yes | yes |
-| Git guard: AI attribution, bulk staging, `--no-verify`, force pushes; a question before a push to main or a merge (`guard-git.sh`) | yes | – |
+| Git guard: AI attribution, bulk staging, `--no-verify`, force pushes, commits on main; a question before a push to main or a merge (`guard-git.sh`) | yes | – |
 | `CLAUDE.md`: evidence before success claims, numbers from executed code, language, skill vetting | yes | a header only |
 | `rules/git.md`: branch first, approval before outward actions, stage by path, no `--no-verify`, no Claude attribution | yes | – |
 | No Claude attribution in commits and pull requests (`attribution`) | yes | – |
@@ -369,10 +369,17 @@ newer Roslyn. `install.ps1` checks the plugin's start script, not the `csharp-ls
   and author a commit takes over (`git commit -C`, `-c`, `--reuse-message`, `--fixup`,
   `--squash`); bulk staging (`git add -A`, `.`, `:/`, `-u`, the repository root, an
   exclude-only pathspec, `git commit -a`); skipped git hooks (`--no-verify`, `git commit -n`,
-  setting `core.hooksPath`); and force pushes in every form (`--force`, `-fu`,
+  setting `core.hooksPath`); force pushes in every form (`--force`, `-fu`,
   `--force-with-lease`, `+branch`, `--mirror`, deleting main), and a pull request updated by
   rebase, which rewrites its pushed branch on GitHub (`gh pr update-branch --rebase`, the
-  GraphQL `updatePullRequestBranch` with `REBASE`). A push to main and the merge of a pull
+  GraphQL `updatePullRequestBranch` with `REBASE`); and a commit on main: `commit`,
+  `cherry-pick`, `revert`, `am`, `merge`, `pull` and `rebase` while the repository the command
+  acts on has main checked out (read from its `HEAD` file, worktrees included, and followed
+  through a `git switch` or `git checkout` earlier on the line), except the forms that make no
+  commit (`--ff-only`, `--abort`, `--squash`, `--dry-run` and the like) and the first commit of a
+  fresh repository. A push to main (also a bare `git push` or `git push origin HEAD` from main,
+  `--all`, `--branches`, the matching refspec `:` and a wildcard over the branches; not a dry
+  run) and the merge of a pull
   request (`gh pr merge`, `gh api .../merge`) it puts to you as a permission question. Permission rules in `settings.json` match the start of a command only
   (`Bash(git push --force*)` misses `git -C dir push --force`); this hook does not match the
   command text either: it splits compound commands outside quotes and here-documents and looks

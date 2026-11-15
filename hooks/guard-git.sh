@@ -38,9 +38,20 @@
 #   reason, as the merge path does not apply there); `gh pr update-branch
 #   --rebase` and the GraphQL updatePullRequestBranch with updateMethod REBASE, which rebase the
 #   pushed branch on GitHub's side. Plain `gh pr update-branch` merges main in and stays allowed.
-# Asked: `git push` whose refspec reaches main (main, HEAD:main, x:main, refs/heads/main),
-# `gh pr merge`, and `gh api` calls that merge a pull request (.../pulls/<n>/merge,
-# mergePullRequest). A block anywhere in the command wins over the question.
+# - A commit on main: `git commit`, `cherry-pick`, `revert`, `am`, `merge`, `pull` and `rebase`
+#   while the repository the command acts on (its folder after cd and -C) has main checked out,
+#   unless a word of theirs says they make no commit (check_commit lists them: --ff-only, --abort,
+#   --quit, --squash, --no-commit, --dry-run and more). The branch is read from the HEAD file
+#   (.git/HEAD, or the one in the folder a worktree's or submodule's .git file names), and a
+#   `git switch` or `git checkout` earlier on the same line moves it for the commands after it. An
+#   unborn main (before the first commit of a fresh repository) is not judged, nor is a folder a
+#   `git init`, `git clone` or `git worktree add` earlier on the line makes; any other folder that
+#   does not exist yet belongs to the repository above it.
+# Asked: `git push` whose refspec reaches main (main, HEAD:main, x:main, refs/heads/main), a push
+# from main without a refspec or of HEAD or @, --all, --branches, the matching refspec `:` and a
+# wildcard over the branches (not as a dry run, which pushes nothing), `gh pr merge`, and `gh api`
+# calls that merge a pull request (.../pulls/<n>/merge, mergePullRequest). A block anywhere in the
+# command wins over the question.
 # git and gh are found at command position only (lib/command-segments.sh): behind global options
 # (`git -C dir`, `git -c k=v`, `--no-pager`), wrappers (env, sudo, timeout, xargs, bash -c, cmd /c,
 # powershell -c, find -exec) and in compound commands. Text inside a quoted message or a
@@ -55,13 +66,26 @@
 # command substitution (`-C "$(git rev-parse x)"`), a message from a command substitution
 # ($(cat msg.txt)) or from a file the hook cannot find; a GraphQL query read from a file
 # (`gh api graphql -F query=@q.graphql`, `--input q.json`) and a REBASE variable in JSON that is a
-# quoted word or piped in (`echo '{...}' | gh api graphql --input -`); a plain `git push` whose
-# upstream is main; abbreviated long options other than --no-veri/--no-verif (`--reuse` for
+# quoted word or piped in (`echo '{...}' | gh api graphql --input -`); a plain `git push` from
+# another branch whose upstream is main; for a commit on main, a repository chosen with GIT_DIR,
+# --git-dir or --work-tree, `git checkout <file>` for a file that does not exist yet (read as a
+# switch to a branch of that name), `git switch -` and `git checkout -` (the branch before is not
+# known), `git branch -m` of the branch checked out, a switch inside a subshell (taken as if it
+# lasted to the end of the line), a reftable repository (git 2.45+, whose HEAD file names no
+# branch), and other default branches than main. The branch is rebuilt from the command text, so
+# each form git knows and this list does not is a gap; git's own hooks would see the real ref, but
+# core.hooksPath belongs to each repository, so a global one cannot sit beside them;
+# abbreviated long options other than --no-veri/--no-verif (`--reuse` for
 # --reuse-message among them); a commit made through the GitHub MCP tools; aliases, scripts,
 # variables. It is a guard against accidents, not against a determined attacker.
 # Blocked although harmless: a commit message, pull request or issue text that quotes an
 # attribution line (a text about this hook, say); `git add -A --dry-run`; a gh api call naming
-# updatePullRequestBranch that passes another value starting with "rebase" (`-f b='Rebase ...'`).
+# updatePullRequestBranch that passes another value starting with "rebase" (`-f b='Rebase ...'`);
+# a plain `git pull` on main that could only fast-forward (pull.ff=only, or no commit of main's
+# own): the hook does not read git's configuration, and the reason names `git pull --ff-only`;
+# `git rebase --skip` and `git am --skip` on main, which go on committing there (`--abort` ends
+# them); a `git switch` in a folder made by `mkdir` on the same line, whose commit is then judged
+# by the repository above it.
 # Rephrase, or ask the user.
 # Tests: hooks/guard-git.test.sh
 
@@ -189,8 +213,213 @@ is_main() {
     [[ $1 == main || $1 == refs/heads/main || $1 == heads/main ]]
 }
 
+# The branch each repository has checked out, by its root in norm_path's spelling: read from its
+# HEAD file the first time it is needed, then what a `git switch` or `git checkout` earlier on the
+# same line moved it to. @unborn for a main without a commit yet, empty for a detached HEAD or a
+# branch that is not known.
+declare -A BRANCH_OF=()
+# The folders a `git init`, `git clone` or `git worktree add` earlier on the line makes a
+# repository of, in norm_path's spelling: git reads their own HEAD, not the repository's above
+declare -a MADE=()
+# The root on_main looked at last, empty when it found none
+ON_ROOT=
+
+# REPLY: the root of the repository holding folder $1, in norm_path's spelling, so that `.`, a
+# trailing /, C:/ or /c/ and the case of a letter name the same one. False when there is none and
+# when a `git init`, `git clone` or `git worktree add` earlier on the line makes the folder or one
+# above it a repository of its own. A folder that does not exist yet otherwise belongs to the
+# repository above it (`mkdir x && cd x && git commit` commits there).
+repo_of() {
+    norm_path "$1"
+    local d=$REPLY i
+    for i in "${MADE[@]}"; do
+        [[ $d == "$i" || $d == "$i"/* ]] && return 1
+    done
+    repo_root "$d"
+}
+
+# True when the repository holding folder $1 has main checked out, in any case of its letters
+# (Windows keeps refs/heads/Main and main in one file). HEAD is read as a file, not through git,
+# as every process costs the tool time: .git/HEAD, or for a linked worktree or a submodule the HEAD
+# in the folder its .git file names (`gitdir: ...`, absolute or relative). A main without a commit
+# yet (a fresh repository) counts as no main until a commit on the line makes it born: neither its
+# ref, nor packed-refs, nor the ref log exists yet. Nothing more is read, as packed-refs can hold
+# megabytes.
+# shortcut: HEAD is read as a file, so a reftable repository (git 2.45+, whose HEAD file names no
+# branch) is not judged; upgrade when one is used here.
+on_main() {
+    ON_ROOT=
+    repo_of "$1" || return 1
+    local r=$REPLY line head
+    ON_ROOT=$r
+    if [[ -z ${BRANCH_OF[$r]+x} ]]; then
+        BRANCH_OF[$r]=
+        head=$r/.git/HEAD
+        if [[ ! -d $r/.git ]]; then
+            # read fills line also when the file ends without a line break, only its status says so
+            line=
+            { IFS= read -r line; } 2>/dev/null < "$r/.git"
+            line=${line%$'\r'}
+            [[ $line == 'gitdir: '* ]] && resolve_path "$r" "${line#gitdir: }" && head=$REPLY/HEAD
+        fi
+        line=
+        { IFS= read -r line; } 2>/dev/null < "$head"
+        line=${line%$'\r'}
+        [[ $line == 'ref: refs/heads/'* ]] && BRANCH_OF[$r]=${line#ref: refs/heads/}
+        if [[ ${BRANCH_OF[$r],,} == main && -d $r/.git && ! -e $r/.git/refs/heads/main &&
+            ! -e $r/.git/packed-refs && ! -e $r/.git/logs/HEAD ]]; then
+            BRANCH_OF[$r]=@unborn
+        fi
+    fi
+    [[ ${BRANCH_OF[$r],,} == main ]]
+}
+
+# A `git switch` or `git checkout` moves the branch for the commands after it on the line: with
+# -c/-C/-b/-B/--orphan (or a value glued to one, -bname, or --create=, --force-create=, --orphan=)
+# the new branch, else the first word that is no option; --detach leaves none, and so does `-`,
+# whose branch is not known; HEAD and @ stay where they are. Paths switch nothing: anything after
+# a `--`, a word of `git checkout` other than main that exists as a file or folder
+# (`git checkout .`), and a second word of `git checkout` without a new branch
+# (`git checkout HEAD a.py` takes a file from a commit). Nothing is recorded for a folder that
+# does not exist yet.
+track_branch() {
+    local a b= named=0 create=0 detach=0
+    for a in "${args[@]}"; do
+        case $a in
+            --) return 0 ;;
+            -c | -C | -b | -B | --orphan | --create | --force-create) create=1 ;;
+            --create=* | --force-create=* | --orphan=*) b=${a#*=}; named=1; create=1 ;;
+            --detach | -d) detach=1 ;;
+            -[bBcC]?*) ((named)) || { b=${a:2}; named=1; create=1; } ;;
+            -*) ;;
+            *)
+                if ((named)); then
+                    # the start point after a new branch, or a path
+                    ((create)) || [[ ${words[GIT_VERB]} == switch ]] || return 0
+                else
+                    if ((!create)) && [[ ${words[GIT_VERB]} == checkout && ${a,,} != main ]]; then
+                        resolve_path "$GIT_DIR_AT" "$a"
+                        [[ -e $REPLY ]] && return 0
+                    fi
+                    b=$a
+                    named=1
+                fi ;;
+        esac
+    done
+    ((named || detach)) || return 0
+    ((!create)) && [[ $b == HEAD || $b == @ ]] && return 0
+    [[ $detach == 1 || $b == - ]] && b=
+    set_branch "$b"
+}
+
+# Records branch $1 as checked out where GIT_DIR_AT is, for the commands after it on the line;
+# nothing for a folder that does not exist yet
+set_branch() {
+    norm_path "$GIT_DIR_AT"
+    [[ -d $REPLY ]] && repo_of "$REPLY" && BRANCH_OF[$REPLY]=$1
+    return 0
+}
+
+# The folder a `git init`, `git clone` or `git worktree add` makes a repository of: the first word
+# that is no option, after the URL for clone, its last part without .git when no folder is named.
+# The value options of each are skipped. A folder that holds a repository already is not recorded:
+# git init only reinitialises it; -h and --help make nothing.
+track_made() {
+    local a i v=${words[GIT_VERB]} d=$GIT_DIR_AT url=
+    local -a pos=()
+    for ((i = 0; i < ${#args[@]}; i++)); do
+        a=${args[i]}
+        case $v:$a in
+            *:--) ;;
+            *:-h | *:--help) return 0 ;;
+            init:-b | init:--initial-branch | init:--object-format | init:--ref-format | \
+                init:--template | init:--separate-git-dir) ((i++)) ;;
+            clone:-b | clone:--branch | clone:-o | clone:--origin | clone:-c | clone:--config | \
+                clone:--depth | clone:--reference | clone:--reference-if-able | clone:-u | \
+                clone:--upload-pack | clone:-j | clone:--jobs | clone:--template | \
+                clone:--separate-git-dir | clone:--shallow-since | clone:--shallow-exclude | \
+                clone:--filter | clone:--server-option | clone:--bundle-uri | clone:--ref-format) ((i++)) ;;
+            worktree:-b | worktree:-B | worktree:--reason) ((i++)) ;;
+            *:-*) ;;
+            *) pos+=("$a") ;;
+        esac
+    done
+    case $v in
+        init) [[ -n ${pos[0]} ]] && { resolve_path "$GIT_DIR_AT" "${pos[0]}"; d=$REPLY; } ;;
+        clone)
+            url=${pos[0]%/}
+            url=${url##*[/:]}
+            url=${url%.git}
+            [[ -n ${pos[1]} ]] && url=${pos[1]}
+            [[ -n $url ]] || return 0
+            resolve_path "$GIT_DIR_AT" "$url"
+            d=$REPLY ;;
+        worktree)
+            # git worktree add <path>: the first word is the subcommand
+            [[ ${pos[0]} == add && -n ${pos[1]} ]] || return 0
+            resolve_path "$GIT_DIR_AT" "${pos[1]}"
+            d=$REPLY ;;
+    esac
+    norm_path "$d"
+    [[ $v != init || ! -e $REPLY/.git ]] && MADE+=("$REPLY")
+    return 0
+}
+
+# A commit on main: the verbs that make one or rewrite main (rebase), unless a word of their own,
+# before a `--`, says they make none: --abort, --quit, -h, --help, --ff-only and
+# --show-current-patch for all of them (only merge and pull know --ff-only; the others refuse it
+# and commit nothing), --squash and --no-commit for merge and pull, --dry-run for pull and commit
+# (and --porcelain, --short and --long, which imply it), -n and --no-commit for cherry-pick and
+# revert, --edit-todo for rebase. A rebase given a branch (`git rebase <upstream> <branch>`)
+# switches to it first and rewrites that one, so it is judged by the branch's name, which is
+# checked out afterwards. A commit that main allows while it is unborn makes it born for the
+# commands after it on the line.
+# shortcut: option values are not skipped, so a message that is exactly one of these words
+# (`-m --abort`) passes, and short flags bundled with -n (`-nx`) are blocked; a plain `git pull`
+# on main is blocked even where it could only fast-forward, as git's configuration is not read.
+# Upgrade if one of them shows up in practice.
+check_commit() {
+    local a i v=${words[GIT_VERB]}
+    local -a pos=()
+    for a in "${args[@]}"; do
+        case $v:$a in
+            *:--) break ;;
+            *:--abort | *:--quit | *:-h | *:--help | *:--ff-only) return 0 ;;
+            *:--show-current-patch | *:--show-current-patch=* | rebase:--edit-todo) return 0 ;;
+            merge:--squash | merge:--no-commit | pull:--squash | pull:--no-commit) return 0 ;;
+            cherry-pick:-n | cherry-pick:--no-commit | revert:-n | revert:--no-commit) return 0 ;;
+            commit:--dry-run | commit:--porcelain | commit:--short | commit:--long) return 0 ;;
+            pull:--dry-run) return 0 ;;
+        esac
+    done
+    if [[ $v == rebase ]]; then
+        for ((i = 0; i < ${#args[@]}; i++)); do
+            a=${args[i]}
+            case $a in
+                --) break ;;
+                --onto | -s | --strategy | -X | --strategy-option | -x | --exec | --empty | -C) ((i++)) ;;
+                -*) ;;
+                *) pos+=("$a") ;;
+            esac
+        done
+        if [[ -n ${pos[1]} ]]; then
+            local b=${pos[1],,}
+            is_main "$b" && commit_refused rebase
+            set_branch "${pos[1]}"
+            return 0
+        fi
+    fi
+    on_main "$GIT_DIR_AT" && commit_refused "$v"
+    [[ -n $ON_ROOT && ${BRANCH_OF[$ON_ROOT]} == @unborn ]] && BRANCH_OF[$ON_ROOT]=main
+    return 0
+}
+
+commit_refused() {
+    block "\`git $1\` would make a commit on main, and main moves only through a pull request or a fast-forward. Create a branch first (\`git switch -c <name>\`) and commit there. To bring main up to date: \`git merge --ff-only origin/main\` or \`git pull --ff-only\`."
+}
+
 check_push() {
-    local i k c a r dst del=0 force=
+    local i k c a r dst del=0 force= all= tags=0 dry=0
     local -a pos=()
     for ((i = 0; i < ${#args[@]}; i++)); do
         a=${args[i]}
@@ -198,6 +427,9 @@ check_push() {
             --mirror) force_push "$a" ;;
             --force | --force-with-lease | --force-with-lease=*) force=${force:-$a} ;;
             --delete) del=1 ;;
+            --all | --branches) all=$a ;;
+            --tags) tags=1 ;;
+            --dry-run) dry=1 ;;
             --repo | --receive-pack | --exec | --push-option) ((i++)) ;;
             --*) ;;
             -?*)
@@ -206,6 +438,7 @@ check_push() {
                     case $c in
                         f) force=${force:-$a} ;;
                         d) del=1 ;;
+                        n) dry=1 ;;
                         o) ((k == ${#a} - 1)) && ((i++)); break ;;
                     esac
                 done ;;
@@ -213,7 +446,8 @@ check_push() {
         esac
     done
     # The first word is the remote, the others are refspecs. Deleting main is answered before a
-    # forced push, with or without -f or a +
+    # forced push, with or without -f or a +. A dry run (--dry-run, -n) pushes nothing, so it is
+    # not asked; it is still blocked like the push it tries
     for a in "${pos[@]:1}"; do
         [[ $a == +* ]] && force=${force:-$a}
         r=${a#+}
@@ -223,9 +457,22 @@ check_push() {
         fi
         dst=${r##*:}
         [[ $r == :* ]] && is_main "$dst" && force_push "$a"
+        ((dry)) && continue
         [[ $r != :* ]] && is_main "$dst" && ask "A push to main changes the shared default branch. The user confirms it."
+        [[ $r == HEAD || $r == @ ]] && on_main "$GIT_DIR_AT" && ask "A push of HEAD from main goes to main, the shared default branch. The user confirms it."
+        # the matching refspec, and a wildcard over all branches, push main as well (not one over a
+        # folder of them, refs/heads/feat/*); the reason names no refspec, as it goes into JSON
+        if [[ $r == : || $dst == '*' || $dst == 'heads/*' || $dst == 'refs/heads/*' ]]; then
+            ask "This push sends every matching branch, main included. The user confirms it."
+        fi
     done
     [[ -n $force ]] && force_push "$force"
+    ((dry)) && return 0
+    [[ -n $all ]] && ask "git push $all pushes every branch, main included. The user confirms it."
+    # Without a refspec git pushes the branch checked out, which on main is main
+    if ((!tags && !del && ${#pos[@]} <= 1)) && on_main "$GIT_DIR_AT"; then
+        ask "A push from main without a refspec goes to main, the shared default branch. The user confirms it."
+    fi
     return 0
 }
 
@@ -261,6 +508,11 @@ check_git() {
             [[ $a == --no-veri || $a == --no-verif || $a == --no-verify ]] && block "\`--no-verify\` skips the repository's git hooks (secret scan, tests, checks). A failing hook is fixed or reported to the user, never skipped."
         done
     fi
+    case ${words[GIT_VERB]} in
+        commit | cherry-pick | revert | am | merge | pull | rebase) check_commit ;;
+        switch | checkout) track_branch ;;
+        init | clone | worktree) track_made ;;
+    esac
     case ${words[GIT_VERB]} in
         add)
             local after=0 p specs=0 positive=0
