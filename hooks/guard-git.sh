@@ -96,7 +96,9 @@
 # abbreviated long options other than --no-veri/--no-verif (`--reuse` for
 # --reuse-message among them); a commit made through the GitHub MCP tools; for the closing check,
 # a merge through `gh api` (asked, its body not read), a pull request created in another tool,
-# and the owner's own `!` commands, which pass no hook; aliases, scripts, variables. It is a
+# the owner's own `!` commands, which pass no hook, and a repository a `git clone` earlier on the
+# same line makes (`git clone url x && cd x && gh pr create` is judged by the repository above
+# x); aliases, scripts, variables. It is a
 # guard against accidents, not against a determined attacker.
 # Blocked although harmless: a commit message, pull request or issue text that quotes an
 # attribution line (a text about this hook, say); `git add -A --dry-run`; a gh api call naming
@@ -108,7 +110,9 @@
 # by the repository above it; a filled closing check the hook cannot see: a `gh api` body read
 # from a file (`--input pr.json`, `-F body=@pr.md`), a PowerShell body built with `n escapes
 # (pass it with --body-file or a here-string), a section inside a command substitution, and
-# `gh pr edit --body-file x && gh pr merge` on one line (the body is read before the line runs).
+# `gh pr edit --body-file x && gh pr merge` on one line (the body is read before the line runs);
+# a `- [x]` checklist right after part 8 without a `## ` heading between, read as part 8's items
+# without a state.
 # Rephrase, or ask the user.
 # Tests: hooks/guard-git.test.sh
 

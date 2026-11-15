@@ -278,8 +278,11 @@ Your own groups or other private marketplaces go into `accounts.json`:
 A configuration made from `recommended` has the `closing-check` skill. To add it to an older
 one, copy `templates/recommended/skills/closing-check` into its `skills/` folder, scan it with
 skillspector, take the closing-check lines of `templates/recommended/CLAUDE.md` ("Evidence" and
-"Heavy runs") into its `CLAUDE.md`, and run `install.ps1` again: the installer links the skill
-into every profile, and from then on `guard-git.sh` asks your pull requests for the section.
+"Heavy runs") into its `CLAUDE.md` and the `PreToolUse` entry with the matcher
+`mcp__.*__(create|merge)_pull_request` of `templates/recommended/settings.json` into its
+`settings.json` (without it, the GitHub MCP tools pass unchecked), and run `install.ps1` again:
+the installer links the skill into every profile, and from then on `guard-git.sh` asks your pull
+requests for the section.
 
 ## Language servers
 
@@ -406,7 +409,8 @@ newer Roslyn. `install.ps1` checks the plugin's start script, not the `csharp-ls
   offers each, labelled by a reader who had not seen its phrases, it caught 26 and 27 of 40
   (recall 0.650 and 0.675) at a precision of 46 of 50 nudges (0.920); the bar for switching it on
   is a recall of 0.80 and a precision of 0.85. `scripts/measure-closing-nudge.py` repeats the
-  measurement on your own transcripts and prints counts only. To try it anyway, add a `Stop`
+  measurement on your own transcripts and prints counts only (`--show`, for the one labelling,
+  prints the messages it names). To try it anyway, add a `Stop`
   entry with `bash ~/.claude/hooks/closing-check-nudge.sh`. Tests:
   `bash hooks/closing-check-nudge.test.sh`.
 - `hooks/block-commit-secrets.sh` is a PreToolUse hook for Bash and PowerShell that scans what a
@@ -433,7 +437,8 @@ newer Roslyn. `install.ps1` checks the plugin's start script, not the `csharp-ls
   Git Bash). If the library is missing or broken, each of the five blocks every call it would
   check with a message
   saying so, rather than letting commands through unchecked; restore the folder (`git checkout`,
-  then `install.ps1`). Register
+  then `install.ps1`). The closing-check nudge uses the library too, but lets every stop pass
+  without it: a nudge is no guard. Register
   each for the matcher `Bash|PowerShell` in your configuration's `settings.json`, like the two
   above. That matcher covers the Monitor tool too: Claude Code hands a Monitor call to every hook
   matched on `Bash` as a Bash call with the same command (measured with Claude Code 2.1.321), so
