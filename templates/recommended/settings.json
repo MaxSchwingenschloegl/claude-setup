@@ -107,6 +107,17 @@
         ]
       },
       {
+        "matcher": "mcp__.*__(create|merge)_pull_request",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash ~/.claude/hooks/guard-git.sh",
+            "shell": "bash",
+            "timeout": 30
+          }
+        ]
+      },
+      {
         "matcher": "Bash|PowerShell",
         "hooks": [
           {

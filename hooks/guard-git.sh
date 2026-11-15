@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# PreToolUse hook (Bash, PowerShell): blocks git and gh commands of a shape the git rules forbid,
+# PreToolUse hook (Bash, PowerShell, the GitHub MCP tools create_pull_request and
+# merge_pull_request): blocks git and gh commands of a shape the git rules forbid,
 # and asks the user before a push to main or the merge of a pull request. Rules alone are followed
 # most of the time, and permission rules in settings.json match a command's start only (they miss
 # `git -C dir push --force`); this is the hard stop for the rest. Plain bash on purpose, like
@@ -47,11 +48,28 @@
 #   unborn main (before the first commit of a fresh repository) is not judged, nor is a folder a
 #   `git init`, `git clone` or `git worktree add` earlier on the line makes; any other folder that
 #   does not exist yet belongs to the repository above it.
+# - A pull request without a filled closing check, once the closing-check skill is installed
+#   (${CLAUDE_CONFIG_DIR:-~/.claude}/skills/closing-check/SKILL.md) and only in a repository
+#   whose owner is the user gh is logged in as (`user:` in gh's hosts.yml, read as a file; the
+#   owner from -R/--repo, a pull request's URL, the REST path, the MCP input, or the url of the
+#   remote gh opens the pull request on, read from the repository's git config (the one marked
+#   `gh-resolved = base`, else upstream, a fork's parent, else origin; a worktree's config through
+#   its commondir)): `gh pr create` (its body in every form above, --body="..." too,
+#   --fill and --web refused, as they carry none), `gh api` creating one (POST to
+#   repos/<owner>/<repo>/pulls, GraphQL createPullRequest, which counts as own) and the MCP tool
+#   create_pull_request. Filled: a line `## Closing check`, then the parts 1. to 8. in order up
+#   to the next `## ` heading, each with at least one item `- [<state>] <text>` (done, open with
+#   owner, issue #<n>, limitation, dropped, or `- [nothing] checked by ...`), no placeholder
+#   (<...>, TODO, TBD, FIXME), and no [limitation] or [nothing] in part 5. The merge of such a
+#   pull request (`gh pr merge`, the MCP tool merge_pull_request) is refused when its body, read
+#   with `gh pr view` (the one process this hook starts, and only there), holds no filled section,
+#   still an item [open with owner], or cannot be read within GUARD_GIT_GH_TIMEOUT seconds
+#   (default 20).
 # Asked: `git push` whose refspec reaches main (main, HEAD:main, x:main, refs/heads/main), a push
 # from main without a refspec or of HEAD or @, --all, --branches, the matching refspec `:` and a
-# wildcard over the branches (not as a dry run, which pushes nothing), `gh pr merge`, and `gh api`
-# calls that merge a pull request (.../pulls/<n>/merge, mergePullRequest). A block anywhere in the
-# command wins over the question.
+# wildcard over the branches (not as a dry run, which pushes nothing), `gh pr merge`, `gh api`
+# calls that merge a pull request (.../pulls/<n>/merge, mergePullRequest) and the MCP tool
+# merge_pull_request. A block anywhere in the command wins over the question.
 # git and gh are found at command position only (lib/command-segments.sh): behind global options
 # (`git -C dir`, `git -c k=v`, `--no-pager`), wrappers (env, sudo, timeout, xargs, bash -c, cmd /c,
 # powershell -c, find -exec) and in compound commands. Text inside a quoted message or a
@@ -76,8 +94,10 @@
 # each form git knows and this list does not is a gap; git's own hooks would see the real ref, but
 # core.hooksPath belongs to each repository, so a global one cannot sit beside them;
 # abbreviated long options other than --no-veri/--no-verif (`--reuse` for
-# --reuse-message among them); a commit made through the GitHub MCP tools; aliases, scripts,
-# variables. It is a guard against accidents, not against a determined attacker.
+# --reuse-message among them); a commit made through the GitHub MCP tools; for the closing check,
+# a merge through `gh api` (asked, its body not read), a pull request created in another tool,
+# and the owner's own `!` commands, which pass no hook; aliases, scripts, variables. It is a
+# guard against accidents, not against a determined attacker.
 # Blocked although harmless: a commit message, pull request or issue text that quotes an
 # attribution line (a text about this hook, say); `git add -A --dry-run`; a gh api call naming
 # updatePullRequestBranch that passes another value starting with "rebase" (`-f b='Rebase ...'`);
@@ -85,7 +105,10 @@
 # own): the hook does not read git's configuration, and the reason names `git pull --ff-only`;
 # `git rebase --skip` and `git am --skip` on main, which go on committing there (`--abort` ends
 # them); a `git switch` in a folder made by `mkdir` on the same line, whose commit is then judged
-# by the repository above it.
+# by the repository above it; a filled closing check the hook cannot see: a `gh api` body read
+# from a file (`--input pr.json`, `-F body=@pr.md`), a PowerShell body built with `n escapes
+# (pass it with --body-file or a here-string), a section inside a command substitution, and
+# `gh pr edit --body-file x && gh pr merge` on one line (the body is read before the line runs).
 # Rephrase, or ask the user.
 # Tests: hooks/guard-git.test.sh
 
@@ -97,19 +120,110 @@ source "$here/lib/command-segments.sh" || {
     exit 2
 }
 
+# The closing check section of a pull request body (the closing-check skill writes it): a line
+# `## Closing check`, then the parts `1.` to `8.` in order, each with at least one item
+# `- [<state>] <text>`, up to the next `## ` heading. Defined before the input is read, so the
+# test-only entry point below can call them without a payload.
+CC_STATES='done|open with owner|issue #[0-9]+|limitation|dropped|nothing'
+# Placeholders: <what> and the like, lower-case words in angle brackets (not a link
+# <https://...>, a type Vec<String> or `x < 5`), and the marker words
+CC_PLACEHOLDER='(^|[^[:alnum:]])<[a-z][a-z ]*>|(^|[^[:alnum:]_])(TODO|TBD|FIXME)([^[:alnum:]_]|$)'
+
+# CC_DEFECT: the first defect of the section in text $1, empty when it is filled; CC_OPEN: its
+# first item `[open with owner]`, empty when none. One pass over the lines; CR line ends (a body
+# written in PowerShell) are cut off. A numbered line is the next part only with the next part's
+# number (any other is text: a numbered sub-step, a list after the section); an item may be
+# indented under another; a second heading starts the section anew (a title that is the heading
+# itself comes before the body). Part 5 (routine steps) takes no [limitation] or [nothing]: a step
+# that was not run stays open with the owner until they drop it, which is how "live verification:
+# not run" reached a merge.
+closing_check_parse() {
+    local line item part=0 items=0 found=0 state text
+    CC_DEFECT= CC_OPEN=
+    while IFS= read -r line; do
+        line=${line%$'\r'}
+        if [[ $line =~ ^'## Closing check'[[:space:]]*$ ]]; then
+            found=1 part=0 items=0
+            CC_DEFECT= CC_OPEN=
+            continue
+        fi
+        ((found)) || continue
+        [[ $line == '## '* ]] && break
+        item=${line#"${line%%[![:space:]]*}"}
+        if [[ $line =~ ^([1-8])\.[[:space:]] ]] && ((BASH_REMATCH[1] == part + 1)); then
+            ((part && !items)) && CC_DEFECT=${CC_DEFECT:-"part $part has no item"}
+            part=$((part + 1)) items=0
+        elif [[ $line == '- '* || ($item == '- ['* && $item != "$line") ]]; then
+            if ((!part)); then
+                CC_DEFECT=${CC_DEFECT:-"item outside a part"}
+                continue
+            fi
+            items=$((items + 1))
+            if [[ $item =~ $CC_PLACEHOLDER ]]; then
+                CC_DEFECT=${CC_DEFECT:-"placeholder in part $part"}
+            elif [[ ! $item =~ ^-\ \[($CC_STATES)\]\ *(.*)$ ]]; then
+                CC_DEFECT=${CC_DEFECT:-"item without a state in part $part"}
+            else
+                state=${BASH_REMATCH[1]} text=${BASH_REMATCH[2]}
+                if ((part == 5)) && [[ $state == limitation || $state == nothing ]]; then
+                    CC_DEFECT=${CC_DEFECT:-"[$state] in part 5: a routine step not run stays [open with owner] until the owner drops it"}
+                elif [[ $state == nothing && $text != 'checked by '* ]]; then
+                    CC_DEFECT=${CC_DEFECT:-"[nothing] without 'checked by' in part $part"}
+                elif [[ $state == 'open with owner' || $state == 'issue #'* ]]; then
+                    [[ $state == open* ]] && CC_OPEN=${CC_OPEN:-$line}
+                    ((${#text} >= 3)) || CC_DEFECT=${CC_DEFECT:-"item too short in part $part"}
+                else
+                    ((${#text} >= 10)) || CC_DEFECT=${CC_DEFECT:-"item too short in part $part"}
+                fi
+            fi
+        fi
+    done <<< "$1"
+    if ((!found)); then
+        CC_DEFECT="no '## Closing check' heading"
+    elif ((part < 8)); then
+        CC_DEFECT=${CC_DEFECT:-"part $((part + 1)) missing"}
+    elif ((!items)); then
+        CC_DEFECT=${CC_DEFECT:-"part 8 has no item"}
+    fi
+}
+
+# Status 0 when text $1 holds a filled section; else 1 with REPLY naming the first defect
+closing_check_form() {
+    closing_check_parse "$1"
+    REPLY=$CC_DEFECT
+    [[ -z $CC_DEFECT ]]
+}
+
+# Test-only entry point (guard-git.test.sh): on a text read from stdin, the first defect or ok
+# (form), or the first item still open with the owner or none (open), as check_merge reads them
+if [[ $GUARD_GIT_SELFTEST == form || $GUARD_GIT_SELFTEST == open ]]; then
+    IFS= read -r -d '' cc_text
+    closing_check_parse "$cc_text"
+    if [[ $GUARD_GIT_SELFTEST == form ]]; then
+        echo "${CC_DEFECT:-ok}"
+    else
+        echo "${CC_OPEN:-none}"
+    fi
+    exit 0
+fi
+
 read_input
 field tool_name 4096
-case $REPLY in
+tool=$REPLY
+case $tool in
     Bash) shell=bash ;;
     PowerShell) shell=powershell ;;
+    mcp__*__create_pull_request | mcp__*__merge_pull_request) shell=mcp ;;
     *) exit 0 ;;
 esac
-field command
-command=$REPLY
-# Fast path: neither git nor gh named anywhere (no lower-case copy: on 60 KB each costs 50 ms)
-shopt -s nocasematch
-[[ $command =~ (^|[^[:alnum:]_.-])(git|gh)([^[:alnum:]_-]|$) ]] || exit 0
-shopt -u nocasematch
+if [[ $shell != mcp ]]; then
+    field command
+    command=$REPLY
+    # Fast path: neither git nor gh named anywhere (no lower-case copy: on 60 KB each costs 50 ms)
+    shopt -s nocasematch
+    [[ $command =~ (^|[^[:alnum:]_.-])(git|gh)([^[:alnum:]_-]|$) ]] || exit 0
+    shopt -u nocasematch
+fi
 
 field cwd 4096
 resolve_path / "${REPLY:-$PWD}"
@@ -418,6 +532,183 @@ commit_refused() {
     block "\`git $1\` would make a commit on main, and main moves only through a pull request or a fast-forward. Create a branch first (\`git switch -c <name>\`) and commit there. To bring main up to date: \`git merge --ff-only origin/main\` or \`git pull --ff-only\`."
 }
 
+# The closing check is on once the closing-check skill is installed: people who never installed
+# it are not asked for a section they cannot fill
+closing_check_on() {
+    [[ -f ${CLAUDE_CONFIG_DIR:-$HOME/.claude}/skills/closing-check/SKILL.md ]]
+}
+
+# REPLY: the user gh is logged in as on github.com, from the hosts.yml gh itself reads (read as a
+# file, no process): in the folder of the first that is set of $GH_CONFIG_DIR, $XDG_CONFIG_HOME/gh
+# and %APPDATA%/GitHub CLI, else ~/.config/gh, as gh's ConfigDir picks it. False when it names
+# none. `user:` counts at the first indent under `github.com:` only, not a key of the same name
+# deeper in its `users:` map.
+gh_login() {
+    local f line indent key value
+    if [[ -n $GH_CONFIG_DIR ]]; then f=$GH_CONFIG_DIR
+    elif [[ -n $XDG_CONFIG_HOME ]]; then f=$XDG_CONFIG_HOME/gh
+    elif [[ -n $APPDATA ]]; then f="$APPDATA/GitHub CLI"
+    else f=$HOME/.config/gh
+    fi
+    REPLY=
+    for f in "$f/hosts.yml"; do
+        [[ -f $f ]] || continue
+        local in=0
+        indent=
+        while IFS= read -r line; do
+            line=${line%$'\r'}
+            if [[ $line == github.com:* ]]; then
+                in=1
+                continue
+            fi
+            ((in)) || continue
+            [[ $line =~ ^[^[:space:]] ]] && break
+            [[ $line =~ ^([[:space:]]+)([^[:space:]:]+):[[:space:]]*([^[:space:]#]*) ]] || continue
+            [[ -n $indent ]] || indent=${BASH_REMATCH[1]}
+            key=${BASH_REMATCH[2]} value=${BASH_REMATCH[3]}
+            if [[ ${BASH_REMATCH[1]} == "$indent" && $key == user ]]; then
+                value=${value//\"/}
+                REPLY=${value//\'/}
+                break
+            fi
+        done < "$f"
+        [[ -n $REPLY ]]
+        return
+    done
+    return 1
+}
+
+# REPLY: the owner of the GitHub repository a pull request from folder $1 goes to, from the url of
+# a remote (https://github.com/<owner>/... or git@github.com:<owner>/...) in its git config, read as
+# a file: .git/config, or for a linked worktree the config in the folder its gitdir's commondir
+# names. The remote is the one gh resolved as base (`gh-resolved = base`), else `upstream` (a fork's
+# parent, where gh opens the pull request), else `origin`. False when there is no repository, no
+# such remote or no GitHub url.
+# shortcut: gh's own choice among other remote names (github, more than one fork) is not modelled;
+# upgrade when a repository here has such remotes.
+repo_owner_of() {
+    local r g line name= key resolved= upstream= origin= url
+    REPLY=
+    norm_path "$1"
+    repo_root "$REPLY" || return 1
+    r=$REPLY g=$REPLY/.git
+    if [[ ! -d $g ]]; then
+        line=
+        { IFS= read -r line; } 2>/dev/null < "$g"
+        line=${line%$'\r'}
+        [[ $line == 'gitdir: '* ]] || return 1
+        resolve_path "$r" "${line#gitdir: }"
+        g=$REPLY
+        line=
+        { IFS= read -r line; } 2>/dev/null < "$g/commondir"
+        line=${line%$'\r'}
+        if [[ -n $line ]]; then
+            resolve_path "$g" "$line"
+            g=$REPLY
+        fi
+    fi
+    declare -A urls=()
+    while IFS= read -r line; do
+        line=${line%$'\r'}
+        if [[ $line =~ ^[[:space:]]*\[ ]]; then
+            name=
+            [[ $line =~ ^[[:space:]]*\[remote[[:space:]]+\"([^\"]+)\"\] ]] && name=${BASH_REMATCH[1]}
+        elif [[ -n $name && $line =~ ^[[:space:]]*([[:alnum:]-]+)[[:space:]]*=[[:space:]]*([^[:space:]]+) ]]; then
+            key=${BASH_REMATCH[1],,}
+            [[ $key == url && -z ${urls[$name]} ]] && urls[$name]=${BASH_REMATCH[2]}
+            [[ $key == gh-resolved && ${BASH_REMATCH[2]} == base ]] && resolved=$name
+        fi
+    done 2>/dev/null < "$g/config"
+    if [[ -n $resolved ]]; then url=${urls[$resolved]}; else url=${urls[upstream]:-${urls[origin]}}; fi
+    [[ $url =~ github\.com[:/]+([^/]+)/ ]] || return 1
+    REPLY=${BASH_REMATCH[1]}
+}
+
+CC_SKELETON="## Closing check
+1. Questions to the owner
+2. Findings
+3. Promises (later, follow-up, I will)
+4. Issue and definition of done
+5. Routine steps
+6. Changed after the last proof
+7. Leftovers
+8. Other sessions"
+
+closing_check_refused() {
+    block "this pull request needs a filled closing check in its body: $1. Run the closing-check skill first and put its list into the body (best with --body-file) as this section, every part with at least one item \`- [<state>] <text>\` (done, open with owner, issue #<n>, limitation, dropped) or \`- [nothing] checked by <what>\`:$nl$nl$CC_SKELETON"
+}
+
+# Refuses a pull request in one of the user's own repositories whose text $2 holds no filled
+# section, once the skill is installed and gh names the user. $1 is the repository's owner, empty
+# for the one the command runs in, @own for a call that names none (GraphQL).
+closing_check_gate() {
+    closing_check_on || return 0
+    gh_login || return 0
+    local login=$REPLY owner=$1
+    if [[ -z $owner ]]; then
+        repo_owner_of "$CS_CWD" || return 0
+        owner=$REPLY
+    fi
+    [[ $owner == @own || ${owner,,} == "${login,,}" ]] || return 0
+    closing_check_form "$2" || closing_check_refused "$REPLY"
+}
+
+# Refuses the merge of a pull request in one of the user's own repositories whose body holds no
+# filled section or still an item open with the owner, once the skill is installed and gh names
+# the user. $1 is the repository's owner and $2 the repository for -R, both empty for the one the
+# command runs in; $3 the pull request (number, URL or branch; empty: the folder's branch). A URL
+# names its owner itself. The body is read with `gh pr view`, the one process this hook starts and
+# the one call that reaches the network (6.5 s measured), and only here, within
+# GUARD_GIT_GH_TIMEOUT seconds (default 20, inside the hook's 30): a body that cannot be read in
+# time refuses the merge, as a hook killed by its timeout would let it run without the question.
+check_merge() {
+    closing_check_on || return 0
+    gh_login || return 0
+    local login=$REPLY owner=$1 out status limit=${GUARD_GIT_GH_TIMEOUT:-20}
+    local -a args=(pr view)
+    [[ -n $3 ]] && args+=("$3")
+    [[ -n $2 ]] && args+=(-R "$2")
+    args+=(--json body --jq .body)
+    [[ $3 =~ ^(https?://)?(www\.)?github\.com/([^/]+)/[^/]+/pull/[0-9]+ ]] && owner=${BASH_REMATCH[3]}
+    if [[ -z $owner ]]; then
+        repo_owner_of "$CS_CWD" || return 0
+        owner=$REPLY
+    fi
+    [[ ${owner,,} == "${login,,}" ]] || return 0
+    out=$(cd "$CS_CWD" 2> /dev/null; GH_PROMPT_DISABLED=1 GH_NO_UPDATE_NOTIFIER=1 timeout "$limit" gh "${args[@]}" 2>&1)
+    status=$?
+    ((status == 124)) && block "the pull request's body could not be read: gh did not answer within $limit s. A merge in the user's own repositories needs the filled closing check in its body; when gh cannot reach it, the user merges themselves."
+    ((status == 0)) || block "the pull request's body could not be read: ${out%%$nl*}. A merge in the user's own repositories needs the filled closing check in its body; when gh cannot reach it, the user merges themselves."
+    closing_check_parse "$out"
+    [[ -z $CC_DEFECT ]] || block "the pull request's body holds no filled closing check: $CC_DEFECT. Run the closing-check skill, put its list into the body (\`gh pr edit <n> --body-file <file>\`) as this section, then merge in a command of its own (the hook reads the body before the line runs):$nl$nl$CC_SKELETON"
+    [[ -z $CC_OPEN ]] || block "the pull request's closing check is still open with owner: $CC_OPEN. The owner decides that item first; then its state in the body changes and the merge can follow."
+    return 0
+}
+
+# REPLY: the pull request a `gh pr merge` names: the first word after merge that is no option and
+# no option's value, empty for the folder's branch
+merge_ref() {
+    local i a pos=0
+    REPLY=
+    for ((i = at + 1; i < n; i++)); do
+        a=${words[i]}
+        case $a in
+            --) ;;
+            -R | --repo | -b | --body | -F | --body-file | -t | --subject | -A | --author-email | --match-head-commit) ((i++)) ;;
+            -*) ;;
+            *) if ((++pos == 3)); then REPLY=$a; return; fi ;;
+        esac
+    done
+}
+
+# REPLY: the owner in a -R/--repo value ([HOST/]OWNER/REPO or a URL)
+repo_flag_owner() {
+    local v=${1%/}
+    v=${v%.git}
+    v=${v%/*}
+    REPLY=${v##*/}
+}
+
 check_push() {
     local i k c a r dst del=0 force= all= tags=0 dry=0
     local -a pos=()
@@ -640,14 +931,17 @@ check_git() {
 }
 
 check_gh() {
-    local i n=${#words[@]} a area="" verb=""
+    local i n=${#words[@]} a area="" verb="" repo="" owner=""
     local -a files=()
     for ((i = at + 1; i < n; i++)); do
         a=${words[i]}
         case $a in
-            -R | --repo) ((i++)) ;;
+            -R | --repo) repo=${words[i+1]}; ((i++)) ;;
+            --repo=*) repo=${a#*=} ;;
+            -R?*) repo=${a:2} ;;
             -F | --body-file | --notes-file) files+=("${words[i+1]}"); ((i++)) ;;
             --body-file=* | --notes-file=*) files+=("${a#*=}") ;;
+            -F?*) files+=("${a:2}") ;;
             -*) ;;
             *) if [[ -z $area ]]; then area=$a; elif [[ -z $verb ]]; then verb=$a; fi ;;
         esac
@@ -657,7 +951,25 @@ check_gh() {
             segment_text
             with_files "$CS_CWD" "${files[@]}"
             attributes_ai "$REPLY" && block "$attribution_reason"
-            [[ $area == pr && $verb == merge ]] && ask "Merging a pull request is the user's decision: gh pr merge."
+            if [[ $area == pr && $verb == create ]]; then
+                # A body glued to its option (--body="...", -b"...") starts its own line here
+                local text=$REPLY
+                for ((i = at + 1; i < n; i++)); do
+                    a=${words[i]}
+                    case $a in
+                        --body=*) text+=$nl${a#--body=} ;;
+                        -b?*) text+=$nl${a:2} ;;
+                    esac
+                done
+                [[ -n $repo ]] && { repo_flag_owner "$repo"; owner=$REPLY; }
+                closing_check_gate "$owner" "$text"
+            fi
+            if [[ $area == pr && $verb == merge ]]; then
+                [[ -n $repo ]] && { repo_flag_owner "$repo"; owner=$REPLY; }
+                merge_ref
+                check_merge "$owner" "$repo" "$REPLY"
+                ask "Merging a pull request is the user's decision: gh pr merge."
+            fi
             if [[ $area == pr && $verb == update-branch ]]; then
                 for ((i = at + 1; i < n; i++)); do
                     a=${words[i],,}
@@ -676,17 +988,79 @@ check_gh() {
             [[ $t == *updatepullrequestbranch* && $t =~ $method ]] && rebase_branch
             if [[ $t =~ pulls/[0-9]+/merge || $t == *mergepullrequest* ]]; then
                 ask "Merging a pull request is the user's decision: gh api ... merge."
-            fi ;;
+            fi
+            api_creates_pr && closing_check_gate "$owner" "$REPLY" ;;
     esac
+}
+
+# True when this `gh api` call creates a pull request; owner (check_gh's) then holds the
+# repository's owner, empty for the folder's own repository, @own for GraphQL, and REPLY the
+# call's text, with each field's value on its own (`-f body=...` without `body=`). REST: POST to repos/<owner>/<repo>/pulls, also implied by a field (gh posts as soon
+# as one is given, unless -X says otherwise); `{owner}` is filled in by gh from the folder's
+# repository. GraphQL: a text naming createPullRequest.
+api_creates_pr() {
+    local i a endpoint= method= fields=0 text pos=0 values=
+    for ((i = at + 1; i < n; i++)); do
+        a=${words[i]}
+        case $a in
+            -f | -F | --field | --raw-field) fields=1; values+=$nl${words[i+1]#*=}; ((i++)) ;;
+            -f?* | -F?*) fields=1; a=${a:2}; values+=$nl${a#*=} ;;
+            --field=* | --raw-field=*) fields=1; a=${a#*=}; values+=$nl${a#*=} ;;
+            -X | --method) method=${words[i+1]^^}; ((i++)) ;;
+            -X?*) method=${a:2}; method=${method^^} ;;
+            --method=*) method=${a#*=}; method=${method^^} ;;
+            --input) fields=1; ((i++)) ;;
+            --input=*) fields=1 ;;
+            -H | --header | -q | --jq | -t | --template | --hostname | -p | --preview | --cache) ((i++)) ;;
+            -*) ;;
+            *) ((++pos == 2)) && endpoint=$a ;;
+        esac
+    done
+    segment_text
+    text=$REPLY$values
+    if [[ $endpoint =~ ^/?repos/([^/]+)/[^/]+/pulls/?$ ]]; then
+        owner=${BASH_REMATCH[1]}
+        [[ $owner == '{owner}' || $owner == :owner ]] && owner=
+        [[ $method == POST || (-z $method && $fields == 1) ]] || return 1
+    elif [[ $endpoint == graphql && ${text,,} == *createpullrequest* ]]; then
+        owner=@own
+    else
+        return 1
+    fi
+    REPLY=$text
 }
 
 # The repository root of the folder a git add ran in last, kept for the next one
 root_of=$'\x01'
 root=
 root_base=
+# The GitHub MCP tools (any server's create_pull_request and merge_pull_request): their input
+# names the owner, and the body or the pull request's number
+check_mcp() {
+    field owner
+    local owner=$REPLY
+    [[ -n $owner ]] || return 0
+    case $tool in
+        *__create_pull_request)
+            field body
+            closing_check_gate "$owner" "$REPLY" ;;
+        *__merge_pull_request)
+            # pullNumber is a JSON number, which field (strings only) does not read
+            local number=
+            [[ $input =~ \"pullNumber\"[[:space:]]*:[[:space:]]*\"?([0-9]+) ]] && number=${BASH_REMATCH[1]}
+            field repo
+            check_merge "$owner" "$owner/$REPLY" "$number"
+            ask "Merging a pull request is the user's decision: ${tool##*__}." ;;
+    esac
+}
+
 CS_PROGRAMS[git]=check_git
 CS_PROGRAMS[gh]=check_gh
-split_command "$command" "$shell" ""
+if [[ $shell == mcp ]]; then
+    check_mcp
+else
+    split_command "$command" "$shell" ""
+fi
 if [[ -n $ask_reason ]]; then
     printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"ask","permissionDecisionReason":"%s"}}' "$ask_reason"
 fi

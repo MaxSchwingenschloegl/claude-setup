@@ -10,6 +10,8 @@ fail=0
 run=0
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
+# No closing-check skill and no gh login unless a case sets them: the user's own must not count
+export CLAUDE_CONFIG_DIR=$tmp/cfg-off GH_CONFIG_DIR=$tmp/nogh APPDATA=$tmp/nogh
 repo=$tmp/trepo   # its Windows path, the default cwd, holds \t, which must not turn into a tab
 mkdir -p "$repo/.git" "$repo/sub/deeper" "$repo/libs/sm" "$repo/vendor/trepo"
 : > "$repo/libs/sm/.git"   # a submodule: its .git is a file
@@ -683,6 +685,371 @@ long+="EOF"
 start=$SECONDS
 check 0 Bash "$long"
 ((SECONDS - start < 5)) || { fail=$((fail + 1)); echo "FAIL a long command took $((SECONDS - start)) s"; }
+
+# Closing check form: the section a pull request body needs before it is created or merged.
+# GUARD_GIT_SELFTEST=form reads a text on stdin and prints ok or the first defect; =open prints
+# the first item still open with the owner, or none.
+skill_md="$(dirname "$0")/../templates/recommended/skills/closing-check/SKILL.md"
+skeleton=
+in_block=0
+while IFS= read -r line; do
+    line=${line%$'\r'}
+    if ((in_block)); then
+        [[ $line == '```'* ]] && break
+        skeleton+=$line$'\n'
+    elif [[ $line == '## Closing check' ]]; then
+        in_block=1
+        skeleton=$line$'\n'
+    fi
+done < "$skill_md"
+[[ $skeleton == *'8. Other sessions'* ]] || { fail=$((fail + 1)); echo "FAIL no skeleton in $skill_md"; }
+# The skeleton with one real item under every part instead of its placeholder line
+fill() {
+    local line out=
+    while IFS= read -r line; do
+        [[ $line == '- ['* ]] && continue
+        out+=$line$'\n'
+        [[ $line =~ ^([1-8])\. ]] && out+="- [done] part ${BASH_REMATCH[1]} walked, see commit 3b13627"$'\n'
+    done <<< "$1"
+    REPLY=$out
+}
+fill "$skeleton"
+filled=$REPLY
+form() {  # expected output, text[, mode]
+    local out
+    out=$(printf '%s' "$2" | GUARD_GIT_SELFTEST=${3:-form} bash "$hook" 2>&1)
+    run=$((run + 1))
+    [[ $out == "$1" ]] && return 0
+    fail=$((fail + 1))
+    echo "FAIL form expected '$1' got '${out:0:160}': ${2:0:80}"
+}
+form ok "$filled"
+form ok "Abschluss der Arbeit, auf Deutsch.
+
+$filled
+Danach geht es weiter."
+form ok "${filled//$'\n'/$'\r\n'}"
+# The CR of a CRLF line is no character of the item: nine characters stay too short
+crlf=${filled/- \[done\] part 2 walked, see commit 3b13627/- [done] 123456789}
+form "item too short in part 2" "${crlf//$'\n'/$'\r\n'}"
+form "placeholder in part 1" "$skeleton"
+form "no '## Closing check' heading" "## Summary
+1. Questions to the owner
+- [done] nothing was asked in this session"
+form "no '## Closing check' heading" "### Closing check
+${filled#*$'\n'}"
+form "part 8 missing" "${filled%%8. Other sessions*}"
+form "part 8 missing" "${filled%%8. Other sessions*}## Testing
+8. Other sessions
+- [done] the hook suite ran green"
+form "part 5 has no item" "${filled/5. Routine steps$'\n'- \[done\] part 5 walked, see commit 3b13627$'\n'/5. Routine steps$'\n'}"
+form "part 3 missing" "${filled/3. Promises/9. Promises}"
+# A numbered line counts as a part only with the next part's number; any other is text of the
+# part it stands in (a numbered sub-step, a list after the section)
+swapped=${filled/3. Promises/X}
+swapped=${swapped/4. Issue/3. Promises}
+form "part 4 missing" "${swapped/X/4. Issue}"
+form ok "${filled/- \[done\] part 2 walked, see commit 3b13627/- [done] part 2 walked, in three steps:
+1. a numbered sub-step
+2. another one}"
+form ok "$filled
+1. a numbered list after the section
+2. its second line"
+# An item indented under another is an item too: checked, and found when still open
+nested=${filled/- \[done\] part 2 walked, see commit 3b13627/- [done] part 2 walked, see commit 3b13627
+  - [open with owner] the nested decision}
+form ok "$nested"
+form "  - [open with owner] the nested decision" "$nested" open
+form "placeholder in part 2" "${nested/the nested decision/the nested TODO}"
+form ok "${filled/- \[done\] part 2 walked, see commit 3b13627/- [done] part 2 walked, see commit 3b13627
+  - a plain note under it}"
+# Links, types and comparisons are no placeholders; <what> and the like are
+form ok "${filled/part 2 walked, see commit 3b13627/part 2 walked, see <https://github.com/o/r/pull/3>}"
+form ok "${filled/part 2 walked, see commit 3b13627/part 2: the parser takes Vec<String> now}"
+form "placeholder in part 2" "${filled/part 2 walked, see commit 3b13627/part 2 walked, see <what you looked at>}"
+# A second heading starts the section anew (a title that is the heading itself)
+form ok "## Closing check
+$filled"
+form "item too short in part 2" "${filled/- \[done\] part 2 walked, see commit 3b13627/- [done] ok}"
+form "item too short in part 4" "${filled/- \[done\] part 4 walked, see commit 3b13627/- [open with owner]}"
+form "placeholder in part 3" "${filled/part 3 walked/TODO walked}"
+form "placeholder in part 6" "${filled/part 6 walked/part 6 FIXME walked}"
+form "placeholder in part 6" "${filled/part 6 walked/part <n> walked}"
+form "placeholder in part 2" "${filled/- \[done\] part 2 walked, see commit 3b13627/- [issue #<n>] recorded there}"
+form "item without a state in part 7" "${filled/- \[done\] part 7 walked/- part 7 walked}"
+form "item without a state in part 7" "${filled/- \[done\] part 7 walked/- [later] part 7 walked}"
+form "item outside a part" "## Closing check
+- [done] an item before the first part
+${filled#*$'\n'}"
+form ok "${filled/- \[done\] part 7 walked, see commit 3b13627/- [nothing] checked by git status of every worktree}"
+form "[nothing] without 'checked by' in part 3" "${filled/- \[done\] part 3 walked, see commit 3b13627/- [nothing] just the session extract}"
+form ok "${filled/- \[done\] part 2 walked, see commit 3b13627/- [issue #12] recorded there
+- [limitation] Windows only, written in README
+- [dropped] the benchmark, the change touches docs only
+- [open with owner] decide the release date}"
+form ok "${filled/part 4 walked/part 4: x < 5 and y > 3, a->b, TODOs.md renamed}"
+# A routine step that was not run stays open with the owner: "live verification not run" as a
+# limitation is how the case that started this reached a merge
+part5_reason='in part 5: a routine step not run stays [open with owner] until the owner drops it'
+form "[limitation] $part5_reason" "${filled/- \[done\] part 5 walked/- [limitation] live verification not run, part 5 walked}"
+form "[nothing] $part5_reason" "${filled/- \[done\] part 5 walked/- [nothing] checked by CLAUDE.md, part 5 walked}"
+form ok "${filled/- \[done\] part 5 walked/- [dropped] live verification, the owner skipped it on 2026-11-15, part 5 walked}"
+form none "$filled" open
+form "- [open with owner] decide the release date" "${filled/- \[done\] part 2 walked, see commit 3b13627/- [open with owner] decide the release date}" open
+form none "## Summary
+- [open with owner] outside the section" open
+
+# Closing check: a pull request in one of the user's own repositories is created only with a filled
+# section, and only once the closing-check skill is installed. Own means the repository's owner is
+# the user gh is logged in as (hosts.yml, read as a file).
+mkdir -p "$tmp/cfg-on/skills/closing-check" "$tmp/cfg-off" "$tmp/gh" "$tmp/nohome"
+: > "$tmp/cfg-on/skills/closing-check/SKILL.md"
+printf 'github.com:\n    git_protocol: https\n    users:\n        owner1:\n    user: owner1\n' > "$tmp/gh/hosts.yml"
+mkrepo() {  # folder, origin url[, upstream url[, the remote gh resolved as base]]
+    mkdir -p "$1/.git"
+    {
+        printf '[core]\n\tbare = false\n'
+        if [[ -n $3 ]]; then
+            printf '[remote "upstream"]\n\turl = %s\n' "$3"
+            [[ $4 == upstream ]] && printf '\tgh-resolved = base\n'
+        fi
+        printf '[remote "origin"]\n\turl = %s\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n' "$2"
+        [[ $4 == origin ]] && printf '\tgh-resolved = base\n'
+        printf '[branch "feature"]\n\tremote = origin\n'
+    } > "$1/.git/config"
+    printf 'ref: refs/heads/feature\n' > "$1/.git/HEAD"
+}
+mkrepo "$tmp/own" https://github.com/owner1/r.git
+mkrepo "$tmp/own-ssh" git@github.com:Owner1/r.git
+mkrepo "$tmp/other" git@github.com:other/r.git
+# gh opens a pull request on the upstream remote when there is one (a fork's parent), unless
+# gh-resolved names the base: the owner that counts is that remote's
+mkrepo "$tmp/other-up" https://github.com/other/r.git https://github.com/owner1/up.git
+mkrepo "$tmp/fork" https://github.com/owner1/proj.git https://github.com/other/proj.git
+mkrepo "$tmp/fork-own-base" https://github.com/owner1/proj.git https://github.com/other/proj.git origin
+mkrepo "$tmp/up-own-base" https://github.com/other/proj.git https://github.com/owner1/proj.git upstream
+mkdir -p "$tmp/norepo"
+mkdir -p "$tmp/own/.git/worktrees/wt" "$tmp/own-wt"
+printf 'gitdir: %s\n' "$tmp/own/.git/worktrees/wt" > "$tmp/own-wt/.git"
+printf '../..\n' > "$tmp/own/.git/worktrees/wt/commondir"
+printf 'ref: refs/heads/wt\n' > "$tmp/own/.git/worktrees/wt/HEAD"
+printf '## Summary\n\nFaster parser.\n' > "$tmp/own/pr-bare.md"
+printf '## Summary\n\nFaster parser.\n\n%s' "$filled" > "$tmp/own/pr-filled.md"
+own=$(cygpath -w "$tmp/own")
+other=$(cygpath -w "$tmp/other")
+cc() {  # expected, skill folder (cfg-on or cfg-off), tool, command[, cwd]
+    local -x CLAUDE_CONFIG_DIR=$tmp/$2 GH_CONFIG_DIR=$tmp/gh
+    check "$1" "$3" "$4" "${5:-$own}"
+}
+cc 2 cfg-on Bash 'gh pr create --title t --body "x"'
+cc 2 cfg-on Bash 'gh pr create --fill'
+cc 2 cfg-on Bash 'gh pr create --web'
+cc 2 cfg-on Bash 'gh pr create --title t --body-file pr-bare.md'
+cc 2 cfg-on Bash 'gh pr create -t t -F pr-bare.md'
+cc 2 cfg-on PowerShell "gh pr create --title t --body 'x'"
+cc 2 cfg-on Bash "gh pr create --title t --body \"${filled%%8. Other*}\""
+cc 2 cfg-on Bash 'gh pr create --title t --body "x"' "$(cygpath -w "$tmp/own-wt")"
+cc 2 cfg-on Bash 'gh pr create --title t --body "x"' "$(cygpath -w "$tmp/own-ssh")"
+cc 2 cfg-on Bash 'gh pr create -R owner1/r --title t --body "x"' "$other"
+cc 2 cfg-on Bash 'gh pr create --repo=owner1/r --title t --body "x"' "$other"
+cc 2 cfg-on Bash 'gh -R github.com/owner1/r pr create --title t --body "x"' "$other"
+cc 2 cfg-on Bash 'cd ../own && gh pr create --title t --body "x"' "$other"
+cc 2 cfg-on Bash 'gh api repos/owner1/r/pulls -f title=t -f head=b -f base=main -f body=x' "$other"
+cc 2 cfg-on Bash 'gh api --method POST /repos/owner1/r/pulls --input pr.json' "$other"
+cc 2 cfg-on Bash 'gh api repos/{owner}/{repo}/pulls -f title=t -f body=x'
+cc 2 cfg-on Bash "gh api graphql -f query='mutation { createPullRequest(input: {repositoryId: \"R_1\", baseRefName: \"main\", headRefName: \"b\", title: \"t\"}) { pullRequest { url } } }'" "$other"
+cc 0 cfg-on Bash "gh pr create --title t --body \"$filled\""
+cc 0 cfg-on Bash 'gh pr create --title t --body-file pr-filled.md'
+cc 0 cfg-on Bash "gh pr create --title t --body \"\$(cat <<'EOF'
+## Summary
+
+Faster parser.
+
+$filled
+EOF
+)\""
+cc 0 cfg-on PowerShell "gh pr create --title t --body @'
+$filled
+'@"
+cc 0 cfg-on PowerShell "gh pr create --title t --body '${filled//$'\n'/$'\r\n'}'"
+cc 0 cfg-on Bash "gh api repos/owner1/r/pulls -f title=t -f body=\"$filled\"" "$other"
+cc 0 cfg-on Bash 'gh api repos/owner1/r/pulls' "$other"
+cc 0 cfg-on Bash 'gh api repos/owner1/r/pulls/5/comments -f body=x' "$other"
+cc 0 cfg-on Bash 'gh api -X GET repos/owner1/r/pulls -f state=open' "$other"
+cc 0 cfg-on Bash 'gh pr view 5 --json body'
+cc 0 cfg-on Bash 'gh pr list'
+cc 0 cfg-off Bash 'gh pr create --title t --body "x"'
+cc 0 cfg-off Bash 'gh api repos/owner1/r/pulls -f title=t -f body=x'
+cc 0 cfg-on Bash 'gh pr create --title t --body "x"' "$other"
+cc 2 cfg-on Bash 'gh pr create --title t --body "x"' "$(cygpath -w "$tmp/other-up")"
+cc 0 cfg-on Bash 'gh pr create --title t --body "x"' "$(cygpath -w "$tmp/fork")"
+cc 2 cfg-on Bash 'gh pr create --title t --body "x"' "$(cygpath -w "$tmp/fork-own-base")"
+cc 2 cfg-on Bash 'gh pr create --title t --body "x"' "$(cygpath -w "$tmp/up-own-base")"
+# The body glued to its option
+cc 0 cfg-on Bash "gh pr create --title t --body=\"$filled\""
+cc 0 cfg-on Bash "gh pr create --title t -b\"$filled\""
+cc 2 cfg-on Bash 'gh pr create --title t --body="x"'
+cc 0 cfg-on Bash 'gh pr create -t t -Fpr-filled.md'
+cc 2 cfg-on Bash 'gh pr create -t t -Fpr-bare.md'
+cc 0 cfg-on Bash "gh pr create --title '## Closing check' --body \"$filled\""
+# gh posts a call with --input as it does one with fields
+cc 2 cfg-on Bash 'gh api repos/owner1/r/pulls --input pr.json' "$other"
+cc 0 cfg-on Bash 'gh pr create -R other/r --title t --body "x"'
+cc 0 cfg-on Bash 'gh pr create --repo other/r --fill'
+cc 0 cfg-on Bash 'gh api repos/other/r/pulls -f title=t -f body=x'
+cc 0 cfg-on Bash 'gh pr create --title t --body "x"' "$(cygpath -w "$repo")"
+# No logged-in user found: no check
+nologin() {  # expected, command
+    local -x CLAUDE_CONFIG_DIR=$tmp/cfg-on GH_CONFIG_DIR=$tmp/nogh APPDATA=$tmp/nogh HOME=$tmp/nohome
+    check "$1" Bash "$2" "$own"
+}
+nologin 0 'gh pr create --title t --body "x"'
+nologin 0 "gh api graphql -f query='mutation { createPullRequest(input: {title: \"t\"}) { pullRequest { url } } }'"
+# gh's own order: GH_CONFIG_DIR alone when set, else XDG_CONFIG_HOME/gh, else the Windows
+# AppData folder, else ~/.config/gh
+mkdir -p "$tmp/appdata/GitHub CLI" "$tmp/xdg/gh" "$tmp/empty-gh"
+cp "$tmp/gh/hosts.yml" "$tmp/appdata/GitHub CLI/hosts.yml"
+cp "$tmp/gh/hosts.yml" "$tmp/xdg/gh/hosts.yml"
+login_from() {  # expected, GH_CONFIG_DIR, XDG_CONFIG_HOME, APPDATA
+    local -x CLAUDE_CONFIG_DIR=$tmp/cfg-on GH_CONFIG_DIR=$2 XDG_CONFIG_HOME=$3 APPDATA=$4 HOME=$tmp/nohome
+    check "$1" Bash 'gh pr create --title t --body "x"' "$own"
+}
+login_from 0 "$tmp/empty-gh" '' "$tmp/appdata"
+login_from 2 '' "$tmp/xdg" ''
+login_from 0 '' "$tmp/empty-gh" "$tmp/appdata"
+login_from 2 '' '' "$tmp/appdata"
+# The refusal names the defect and gives the section's skeleton
+cc_says() {  # text the reason must hold, command
+    local -x CLAUDE_CONFIG_DIR=$tmp/cfg-on GH_CONFIG_DIR=$tmp/gh
+    local value=${2//\"/\\\"} cwd=${own//\\/\\\\} json err
+    json="{\"session_id\":\"t\",\"cwd\":\"$cwd\",\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$value\"}}"
+    err=$(printf '%s' "$json" | bash "$hook" 2>&1 >/dev/null)
+    run=$((run + 1))
+    [[ $err == *"$1"* ]] && return 0
+    fail=$((fail + 1))
+    echo "FAIL expected a reason with '$1': $2 (got: ${err:0:200})"
+}
+cc_says "no '## Closing check' heading" 'gh pr create --title t --body "x"'
+cc_says '## Closing check' 'gh pr create --fill'
+cc_says '1. Questions to the owner' 'gh pr create --fill'
+cc_says '8. Other sessions' 'gh pr create --fill'
+cc_says 'closing-check skill' 'gh pr create --fill'
+
+# The same stop for the GitHub MCP tools, whose input names the owner
+mcp() {  # expected, skill folder, tool, tool_input as JSON[, stdout pattern]
+    local -x CLAUDE_CONFIG_DIR=$tmp/$2 GH_CONFIG_DIR=$tmp/gh
+    local json out got
+    json="{\"session_id\":\"t\",\"cwd\":\"${own//\\/\\\\}\",\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"$3\",\"tool_input\":$4}"
+    out=$(printf '%s' "$json" | bash "$hook" 2>/dev/null)
+    got=$?
+    run=$((run + 1))
+    [[ $got == "$1" && (-z $5 && -z $out || -n $5 && $out == *"$5"*) ]] && return 0
+    fail=$((fail + 1))
+    echo "FAIL mcp expected $1${5:+ with $5} got $got${out:+ and stdout $out}: $3 ${4:0:120}"
+}
+json_text() {  # REPLY: $1 as the inside of a JSON string
+    local s=${1//\\/\\\\}
+    s=${s//\"/\\\"}
+    s=${s//$'\r'/\\r}
+    REPLY=${s//$'\n'/\\n}
+}
+json_text "$filled"
+filled_json=$REPLY
+create=mcp__plugin_github_github__create_pull_request
+mcp 2 cfg-on $create '{"owner":"owner1","repo":"r","title":"t","head":"b","base":"main","body":"x"}'
+mcp 2 cfg-on $create '{"owner":"Owner1","repo":"r","title":"t","head":"b","base":"main"}'
+mcp 2 cfg-on mcp__github__create_pull_request '{"owner":"owner1","repo":"r","title":"t","body":"x"}'
+mcp 0 cfg-on $create "{\"owner\":\"owner1\",\"repo\":\"r\",\"title\":\"t\",\"head\":\"b\",\"base\":\"main\",\"body\":\"$filled_json\"}"
+json_text "${filled//$'\n'/$'\r\n'}"
+mcp 0 cfg-on $create "{\"owner\":\"owner1\",\"repo\":\"r\",\"title\":\"t\",\"body\":\"$REPLY\"}"
+mcp 0 cfg-on $create '{"owner":"other","repo":"r","title":"t","body":"x"}'
+mcp 0 cfg-off $create '{"owner":"owner1","repo":"r","title":"t","body":"x"}'
+mcp 0 cfg-on mcp__plugin_github_github__issue_write '{"method":"create","owner":"owner1","repo":"r","title":"t","body":"x"}'
+mcp 0 cfg-on mcp__plugin_github_github__update_pull_request '{"owner":"owner1","repo":"r","pullNumber":5,"body":"x"}'
+
+# The merge stop: the hook reads the pull request's body with `gh pr view` (a fake gh here, first on
+# PATH, that prints the file FAKE_GH_BODY names or fails like gh without a network) and refuses the
+# merge without a filled section or with an item still open with the owner. After a pass the merge
+# is still the user's decision.
+mkdir -p "$tmp/bin"
+cat > "$tmp/bin/gh" <<'EOF'
+#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$FAKE_GH_LOG"
+[[ -n $FAKE_GH_SLEEP ]] && sleep "$FAKE_GH_SLEEP"
+if [[ -z $FAKE_GH_BODY ]]; then
+    echo 'error connecting to api.github.com' >&2
+    echo 'check your internet connection or https://githubstatus.com' >&2
+    exit 1
+fi
+cat "$FAKE_GH_BODY"
+EOF
+chmod +x "$tmp/bin/gh"
+printf '## Summary\n\nFaster parser.\n\n%s' "$filled" > "$tmp/body-filled.md"
+printf '## Summary\n\nFaster parser.\n\nlive benchmarks: not run\n' > "$tmp/body-bare.md"
+printf '## Summary\n\n%s' "${filled/- \[done\] part 3 walked, see commit 3b13627/- [open with owner] run the live benchmark}" > "$tmp/body-open.md"
+merge_ask='Merging a pull request'
+gm() {  # expected (2, ask), body fixture (empty: gh fails), tool, command or tool_input[, skill folder[, cwd]]
+    local -x CLAUDE_CONFIG_DIR=$tmp/${5:-cfg-on} GH_CONFIG_DIR=$tmp/gh PATH="$tmp/bin:$PATH" FAKE_GH_LOG=$tmp/gh.log
+    local -x FAKE_GH_BODY=${2:+$tmp/$2}
+    if [[ $3 == mcp__* ]]; then
+        if [[ $1 == ask ]]; then mcp 0 "${5:-cfg-on}" "$3" "$4" '"permissionDecision":"ask"'; else mcp "$1" "${5:-cfg-on}" "$3" "$4"; fi
+    else
+        check "$1" "$3" "$4" "${6:-$own}"
+    fi
+}
+: > "$tmp/gh.log"
+gm ask body-filled.md Bash 'gh pr merge 5 --merge'
+gm 2 body-bare.md Bash 'gh pr merge 5 --merge'
+gm 2 body-open.md Bash 'gh pr merge 5 --squash --delete-branch'
+gm 2 '' Bash 'gh pr merge 5 --merge'
+gm 2 body-bare.md Bash 'gh pr merge --merge'
+gm 2 body-bare.md Bash 'gh pr merge -t "Faster parser" --merge 5'
+gm 2 body-bare.md PowerShell 'gh pr merge 5 --merge'
+gm 2 body-bare.md Bash 'gh pr merge https://github.com/owner1/r/pull/5 --merge'
+gm 2 body-bare.md Bash 'gh pr merge 5 -R owner1/r --merge'
+gm ask body-bare.md Bash 'gh pr merge 5 -R other/r --merge'
+gm ask body-bare.md Bash 'gh pr merge 5 --merge' cfg-off
+# gh was asked for exactly the body of the pull request named, in the repository named
+gh_log=$(<"$tmp/gh.log")
+for want in 'pr view 5 --json body --jq .body' 'pr view https://github.com/owner1/r/pull/5 --json body --jq .body' 'pr view 5 -R owner1/r --json body --jq .body' 'pr view --json body --jq .body'; do
+    run=$((run + 1))
+    [[ $nl$gh_log$nl == *"$nl$want$nl"* ]] || { fail=$((fail + 1)); echo "FAIL gh was not called as: gh $want (log: ${gh_log//$nl/ | })"; }
+done
+run=$((run + 1))
+[[ $gh_log != *other/r* ]] || { fail=$((fail + 1)); echo "FAIL gh read the body of another owner's pull request"; }
+# The refusal says why
+gm_says() {  # text the reason must hold, body fixture, command
+    local -x CLAUDE_CONFIG_DIR=$tmp/cfg-on GH_CONFIG_DIR=$tmp/gh PATH="$tmp/bin:$PATH" FAKE_GH_LOG=$tmp/gh.log
+    local -x FAKE_GH_BODY=${2:+$tmp/$2}
+    cc_says "$1" "$3"
+}
+gm_says 'still open with owner: - [open with owner] run the live benchmark' body-open.md 'gh pr merge 5 --merge'
+gm_says "could not be read: error connecting to api.github.com" '' 'gh pr merge 5 --merge'
+gm_says "no '## Closing check' heading" body-bare.md 'gh pr merge 5 --merge'
+# A gh that hangs (a stalled connection) refuses the merge instead of eating the hook's timeout
+slow_says() {  # text the reason must hold, command
+    local -x GUARD_GIT_GH_TIMEOUT=1 FAKE_GH_SLEEP=5
+    gm_says "$1" body-filled.md "$2"
+}
+slow_says 'gh did not answer within 1 s' 'gh pr merge 5 --merge'
+# A pull request named by its URL belongs to the URL's owner, wherever the command runs
+: > "$tmp/gh.log"
+gm 2 body-bare.md Bash 'gh pr merge https://github.com/owner1/r/pull/5 --merge' cfg-on "$(cygpath -w "$tmp/norepo")"
+gm ask body-bare.md Bash 'gh pr merge https://github.com/other/x/pull/5 --merge'
+gm ask body-bare.md Bash 'gh pr merge 5 --merge' cfg-on "$(cygpath -w "$tmp/fork")"
+gm 2 body-bare.md Bash 'gh pr merge 5 --merge' cfg-on "$(cygpath -w "$tmp/other-up")"
+run=$((run + 1))
+[[ $(<"$tmp/gh.log") != *other/x* ]] || { fail=$((fail + 1)); echo "FAIL gh read the body of another owner's pull request named by URL"; }
+merge=mcp__plugin_github_github__merge_pull_request
+: > "$tmp/gh.log"   # the MCP cases alone show which pull request they read
+gm ask body-filled.md $merge '{"owner":"owner1","repo":"r","pullNumber":5,"merge_method":"squash"}'
+gm 2 body-bare.md $merge '{"owner":"owner1","repo":"r","pullNumber":5}'
+gm 2 body-open.md $merge '{"owner":"owner1","repo":"r","pullNumber": 5}'
+gm 2 '' $merge '{"owner":"owner1","repo":"r","pullNumber":5}'
+gm ask body-bare.md $merge '{"owner":"other","repo":"r","pullNumber":5}'
+gm ask body-bare.md $merge '{"owner":"owner1","repo":"r","pullNumber":5}' cfg-off
+run=$((run + 1))
+[[ $(<"$tmp/gh.log") == *'pr view 5 -R owner1/r --json body --jq .body'* ]] || { fail=$((fail + 1)); echo "FAIL the MCP merge did not read the body of owner1/r#5"; }
 
 # Large commands stay well inside the timeout: a hook that times out lets the command run unchecked
 # The limit catches a return of the old quadratic split (47 s and more at 30 KB), with room for a

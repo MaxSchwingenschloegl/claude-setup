@@ -157,12 +157,12 @@ Run the dry run first and read it. The installer takes over what you had:
 | Transcripts kept 90 days (default 30) | yes | yes |
 | Deny rules for secret files | yes | yes |
 | Commit secret scan (`block-commit-secrets.sh`) | yes | yes |
-| Git guard: AI attribution, bulk staging, `--no-verify`, force pushes, commits on main; a question before a push to main or a merge (`guard-git.sh`) | yes | – |
-| `CLAUDE.md`: evidence before success claims, numbers from executed code, language, skill vetting | yes | a header only |
+| Git guard: AI attribution, bulk staging, `--no-verify`, force pushes, commits on main, a pull request or merge in your own repositories without a filled closing check; a question before a push to main or a merge (`guard-git.sh`) | yes | – |
+| `CLAUDE.md`: evidence before success claims, numbers from executed code, a closing check before handovers, pull requests and expensive runs, one heavy run at a time, language, skill vetting | yes | a header only |
 | `rules/git.md`: branch first, approval before outward actions, stage by path, no `--no-verify`, no Claude attribution | yes | – |
 | No Claude attribution in commits and pull requests (`attribution`) | yes | – |
 | Plugins: feature-dev, code-review, claude-md-management, frontend-design (skillspector 0 to 13, `plugins/VENDORED.md`) | yes | – |
-| Global skills `grilling` and `grill-me` (an interview that stress-tests a plan) | yes | – |
+| Global skills `grilling` and `grill-me` (an interview that stress-tests a plan) and `closing-check` (a fixed list of what a piece of work left open, checked by a second reader) | yes | – |
 | Spinner tips off, unused claude.ai skills off | yes | – |
 | Bash timeouts raised to 5 minutes (default) and 20 minutes (maximum) | yes | yes |
 
@@ -275,6 +275,12 @@ Your own groups or other private marketplaces go into `accounts.json`:
 `.claude-plugin/marketplace.json`). Global skills for every session go into the configuration's
 `skills/` folder, one folder per skill.
 
+A configuration made from `recommended` has the `closing-check` skill. To add it to an older
+one, copy `templates/recommended/skills/closing-check` into its `skills/` folder, scan it with
+skillspector, take the closing-check lines of `templates/recommended/CLAUDE.md` ("Evidence" and
+"Heavy runs") into its `CLAUDE.md`, and run `install.ps1` again: the installer links the skill
+into every profile, and from then on `guard-git.sh` asks your pull requests for the section.
+
 ## Language servers
 
 A language-server plugin (`pyright-lsp`, `typescript-lsp`, `csharp-lsp`, `rust-lsp`, …) gives
@@ -380,11 +386,29 @@ newer Roslyn. `install.ps1` checks the plugin's start script, not the `csharp-ls
   fresh repository. A push to main (also a bare `git push` or `git push origin HEAD` from main,
   `--all`, `--branches`, the matching refspec `:` and a wildcard over the branches; not a dry
   run) and the merge of a pull
-  request (`gh pr merge`, `gh api .../merge`) it puts to you as a permission question. Permission rules in `settings.json` match the start of a command only
+  request (`gh pr merge`, `gh api .../merge`, the GitHub MCP tool `merge_pull_request`) it puts
+  to you as a permission question. Once the `closing-check` skill is installed, it also refuses a
+  pull request in one of your own repositories (its owner is the user gh is logged in as) whose
+  body holds no filled `## Closing check` section: `gh pr create` in every body form, `gh api`
+  creating one (REST or GraphQL) and the MCP tool `create_pull_request`; and the merge of one
+  whose body (read with `gh pr view`, the one call that reaches the network) has no filled
+  section or still an item `[open with owner]`, also when gh cannot read it. The refusal gives
+  the section's skeleton; other people's repositories and setups without the skill are not
+  asked. Permission rules in `settings.json` match the start of a command only
   (`Bash(git push --force*)` misses `git -C dir push --force`); this hook does not match the
   command text either: it splits compound commands outside quotes and here-documents and looks
   only at the program at command position, so a pull request body that mentions `git add -A`
   passes. Tests: `bash hooks/guard-git.test.sh`.
+- `hooks/closing-check-nudge.sh` is a Stop hook: when the session's last message offers a
+  handover or a `/clear`, or says the session is done, and shows no `## Closing check`, it asks
+  once for the closing check (or for "it was no such offer"); the second stop always passes. It
+  is not switched on in the templates. Measured on local transcripts on two fresh samples of 40
+  offers each, labelled by a reader who had not seen its phrases, it caught 26 and 27 of 40
+  (recall 0.650 and 0.675) at a precision of 46 of 50 nudges (0.920); the bar for switching it on
+  is a recall of 0.80 and a precision of 0.85. `scripts/measure-closing-nudge.py` repeats the
+  measurement on your own transcripts and prints counts only. To try it anyway, add a `Stop`
+  entry with `bash ~/.claude/hooks/closing-check-nudge.sh`. Tests:
+  `bash hooks/closing-check-nudge.test.sh`.
 - `hooks/block-commit-secrets.sh` is a PreToolUse hook for Bash and PowerShell that scans what a
   `git commit` would take (the staged changes; with `-a` or paths also the unstaged ones; with a
   `git add` in the same command also the files it adds, with `git add -f` ignored ones too) for
