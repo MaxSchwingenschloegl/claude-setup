@@ -670,8 +670,9 @@ closing_check_gate() {
 # mark): a pull request Dependabot opened and wrote every commit of (`app/dependabot
 # dependabot[bot]`) carries no closing check, so its body is not judged; the merge question
 # stays. A commit authored by anyone else on its branch (a session's fix, a merge of main) makes it
-# judged. A commit that keeps Dependabot as its author (rebase, amend, cherry-pick) needs a force
-# push, which this hook refuses, or --author, which is no accident.
+# judged. A commit that keeps Dependabot as its author is not told apart (gh names no committer):
+# a rebase or amend of the branch needs a force push, which this hook refuses, but a cherry-pick,
+# `git commit -C` or --author of a Dependabot commit pushes normally and stays exempt.
 # shortcut: Dependabot is the only author exempt, named here, and gh may list only a page of a pull
 # request's commits (not measured; the largest pull request found had 69); upgrade to a list when
 # another bot opens pull requests in the user's repositories.

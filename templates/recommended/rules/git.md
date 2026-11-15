@@ -32,7 +32,9 @@ require AI attribution: then follow them and tell me that you did.
   stacked pull request that has merged takes `main` in by a merge: `git merge origin/main` (or
   `gh pr update-branch`, the same on GitHub's side), resolve, push normally, and squash-merge
   that pull request, unless the repository names another merge method, so the merge commit does
-  not reach `main`. The pull request and its review stay where they are.
+  not reach `main`. The pull request and its review stay where they are. A Dependabot pull
+  request is the exception: ask Dependabot to rebase it (a comment `@dependabot rebase`), so
+  every commit on it stays Dependabot's and its merge needs no closing check.
 - Never rewrite a pushed branch: no force push in any form (`-f`, `--force`,
   `--force-with-lease`, a `+` refspec), no `gh pr update-branch --rebase`, no rebase after the
   first push. A branch that was never pushed may be rebased.
