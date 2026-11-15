@@ -7,7 +7,8 @@
 # (${CLAUDE_CONFIG_DIR:-~/.claude}/skills/closing-check/SKILL.md). The Stop event fires for the
 # main session only; subagents have their own.
 # The phrases below are the single source: scripts/measure-closing-nudge.py runs this hook in its
-# batch mode over local transcripts to measure precision and recall before the hook is switched on.
+# batch mode over local transcripts to measure precision and recall (2026-11-15: recall 0.650 and
+# 0.675, precision 0.920 on two fresh samples; switched on by the owner below the bar of 0.80).
 # Plain bash, no process on a normal call. A missing library lets every stop pass: a nudge is no
 # guard.
 # Not covered: an offer in words the list does not know (English is untested, the measured corpus

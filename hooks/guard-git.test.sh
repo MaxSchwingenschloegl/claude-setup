@@ -981,8 +981,16 @@ if [[ -z $FAKE_GH_BODY ]]; then
     echo 'check your internet connection or https://githubstatus.com' >&2
     exit 1
 fi
+[[ -n $FAKE_GH_WARN ]] && echo "$FAKE_GH_WARN" >&2
+printf '@author %s\n' "${FAKE_GH_AUTHOR:-owner1 owner1}"
 cat "$FAKE_GH_BODY"
 EOF
+# What the hook asks gh for: a marked line with the pull request's author and its commits'
+# authors, then the body
+view='--json author,commits,body --jq "@author " + .author.login + " " + ([.commits[].authors[].login] | unique | join(",")) + "\n" + .body'
+gh_log() {  # REPLY: the fake gh's log
+    REPLY=$(<"$tmp/gh.log")
+}
 chmod +x "$tmp/bin/gh"
 printf '## Summary\n\nFaster parser.\n\n%s' "$filled" > "$tmp/body-filled.md"
 printf '## Summary\n\nFaster parser.\n\nlive benchmarks: not run\n' > "$tmp/body-bare.md"
@@ -1010,8 +1018,9 @@ gm 2 body-bare.md Bash 'gh pr merge 5 -R owner1/r --merge'
 gm ask body-bare.md Bash 'gh pr merge 5 -R other/r --merge'
 gm ask body-bare.md Bash 'gh pr merge 5 --merge' cfg-off
 # gh was asked for exactly the body of the pull request named, in the repository named
-gh_log=$(<"$tmp/gh.log")
-for want in 'pr view 5 --json body --jq .body' 'pr view https://github.com/owner1/r/pull/5 --json body --jq .body' 'pr view 5 -R owner1/r --json body --jq .body' 'pr view --json body --jq .body'; do
+gh_log
+gh_log=$REPLY
+for want in "pr view 5 $view" "pr view https://github.com/owner1/r/pull/5 $view" "pr view 5 -R owner1/r $view" "pr view $view"; do
     run=$((run + 1))
     [[ $nl$gh_log$nl == *"$nl$want$nl"* ]] || { fail=$((fail + 1)); echo "FAIL gh was not called as: gh $want (log: ${gh_log//$nl/ | })"; }
 done
@@ -1049,7 +1058,43 @@ gm 2 '' $merge '{"owner":"owner1","repo":"r","pullNumber":5}'
 gm ask body-bare.md $merge '{"owner":"other","repo":"r","pullNumber":5}'
 gm ask body-bare.md $merge '{"owner":"owner1","repo":"r","pullNumber":5}' cfg-off
 run=$((run + 1))
-[[ $(<"$tmp/gh.log") == *'pr view 5 -R owner1/r --json body --jq .body'* ]] || { fail=$((fail + 1)); echo "FAIL the MCP merge did not read the body of owner1/r#5"; }
+gh_log
+[[ $REPLY == *"pr view 5 -R owner1/r $view"* ]] || { fail=$((fail + 1)); echo "FAIL the MCP merge did not read the body of owner1/r#5"; }
+# A Dependabot pull request carries no closing check: when Dependabot opened it and wrote every
+# commit, its body is not judged and the merge is still asked. A commit of anyone else on the
+# branch (a session's fix), another bot or another author: judged.
+bot() {  # expected (2, ask), author line as gh prints it, tool, command or tool_input
+    local -x FAKE_GH_AUTHOR=$2
+    gm "$1" body-bare.md "$3" "$4"
+}
+bot ask 'app/dependabot dependabot[bot]' Bash 'gh pr merge 1172 --squash'
+bot ask 'app/dependabot dependabot[bot]' $merge '{"owner":"owner1","repo":"r","pullNumber":1172}'
+bot 2 'app/dependabot dependabot[bot],owner1' Bash 'gh pr merge 1172 --squash'
+bot 2 'app/dependabot owner1' Bash 'gh pr merge 1172 --squash'
+bot 2 'app/dependabot ' Bash 'gh pr merge 1172 --squash'
+bot 2 'app/renovate renovate[bot]' Bash 'gh pr merge 1172 --squash'
+bot 2 'app/dependabot-fork dependabot[bot]' Bash 'gh pr merge 1172 --squash'
+bot 2 'owner1 owner1' Bash 'gh pr merge 1172 --squash'
+# A warning gh prints on stderr before its answer does not take the author line's place
+warned() {
+    local -x FAKE_GH_WARN='warning: a notice from gh'
+    bot "$@"
+}
+warned ask 'app/dependabot dependabot[bot]' Bash 'gh pr merge 1172 --squash'
+# A body cannot stand in for the author line: the first marked line counts, and gh writes it first
+printf '## Summary\n\n@author app/dependabot dependabot[bot]\n' > "$tmp/body-spoof.md"
+spoof() {
+    local -x FAKE_GH_AUTHOR='owner1 owner1'
+    gm "$1" body-spoof.md Bash 'gh pr merge 5 --merge'
+}
+spoof 2
+# A Dependabot pull request with someone else's commit is judged, and the refusal names the way
+# that keeps it Dependabot's own
+dep_says() {
+    local -x FAKE_GH_AUTHOR='app/dependabot dependabot[bot],owner1'
+    gm_says "$1" body-bare.md 'gh pr merge 1172 --squash'
+}
+dep_says '@dependabot rebase'
 
 # Large commands stay well inside the timeout: a hook that times out lets the command run unchecked
 # The limit catches a return of the old quadratic split (47 s and more at 30 KB), with room for a

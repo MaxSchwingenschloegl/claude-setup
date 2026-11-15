@@ -64,7 +64,7 @@
 #   pull request (`gh pr merge`, the MCP tool merge_pull_request) is refused when its body, read
 #   with `gh pr view` (the one process this hook starts, and only there), holds no filled section,
 #   still an item [open with owner], or cannot be read within GUARD_GIT_GH_TIMEOUT seconds
-#   (default 20).
+#   (default 20); the body of one Dependabot opened and wrote every commit of is not judged.
 # Asked: `git push` whose refspec reaches main (main, HEAD:main, x:main, refs/heads/main), a push
 # from main without a refspec or of HEAD or @, --all, --branches, the matching refspec `:` and a
 # wildcard over the branches (not as a dry run, which pushes nothing), `gh pr merge`, `gh api`
@@ -665,14 +665,24 @@ closing_check_gate() {
 # the one call that reaches the network (6.5 s measured), and only here, within
 # GUARD_GIT_GH_TIMEOUT seconds (default 20, inside the hook's 30): a body that cannot be read in
 # time refuses the merge, as a hook killed by its timeout would let it run without the question.
+# The same call names the authors, on the first line marked `@author ` (jq writes it before the
+# body, so a line of the body cannot stand in for it, and a warning gh prints first carries no
+# mark): a pull request Dependabot opened and wrote every commit of (`app/dependabot
+# dependabot[bot]`) carries no closing check, so its body is not judged; the merge question
+# stays. A commit authored by anyone else on its branch (a session's fix, a merge of main) makes it
+# judged. A commit that keeps Dependabot as its author (rebase, amend, cherry-pick) needs a force
+# push, which this hook refuses, or --author, which is no accident.
+# shortcut: Dependabot is the only author exempt, named here, and gh may list only a page of a pull
+# request's commits (not measured; the largest pull request found had 69); upgrade to a list when
+# another bot opens pull requests in the user's repositories.
 check_merge() {
     closing_check_on || return 0
     gh_login || return 0
-    local login=$REPLY owner=$1 out status limit=${GUARD_GIT_GH_TIMEOUT:-20}
+    local login=$REPLY owner=$1 out status limit=${GUARD_GIT_GH_TIMEOUT:-20} authors=
     local -a args=(pr view)
     [[ -n $3 ]] && args+=("$3")
     [[ -n $2 ]] && args+=(-R "$2")
-    args+=(--json body --jq .body)
+    args+=(--json author,commits,body --jq '"@author " + .author.login + " " + ([.commits[].authors[].login] | unique | join(",")) + "\n" + .body')
     [[ $3 =~ ^(https?://)?(www\.)?github\.com/([^/]+)/[^/]+/pull/[0-9]+ ]] && owner=${BASH_REMATCH[3]}
     if [[ -z $owner ]]; then
         repo_owner_of "$CS_CWD" || return 0
@@ -683,7 +693,11 @@ check_merge() {
     status=$?
     ((status == 124)) && block "the pull request's body could not be read: gh did not answer within $limit s. A merge in the user's own repositories needs the filled closing check in its body; when gh cannot reach it, the user merges themselves."
     ((status == 0)) || block "the pull request's body could not be read: ${out%%$nl*}. A merge in the user's own repositories needs the filled closing check in its body; when gh cannot reach it, the user merges themselves."
+    [[ $out =~ (^|$nl)'@author '([^$nl]*) ]] && authors=${BASH_REMATCH[2]}
+    [[ $authors == 'app/dependabot dependabot[bot]' ]] && return 0
+    # the author line stays: a line before the heading is no part of the section
     closing_check_parse "$out"
+    [[ -z $CC_DEFECT || $authors != 'app/dependabot '* ]] || block "this Dependabot pull request has commits of other authors on its branch (${authors#app/dependabot }), so its body needs a filled closing check like any other ($CC_DEFECT). If the only other commit merges main in, ask Dependabot to rebase instead (a comment \`@dependabot rebase\` on the pull request): then every commit is its own again."
     [[ -z $CC_DEFECT ]] || block "the pull request's body holds no filled closing check: $CC_DEFECT. Run the closing-check skill, put its list into the body (\`gh pr edit <n> --body-file <file>\`) as this section, then merge in a command of its own (the hook reads the body before the line runs):$nl$nl$CC_SKELETON"
     [[ -z $CC_OPEN ]] || block "the pull request's closing check is still open with owner: $CC_OPEN. The owner decides that item first; then its state in the body changes and the merge can follow."
     return 0

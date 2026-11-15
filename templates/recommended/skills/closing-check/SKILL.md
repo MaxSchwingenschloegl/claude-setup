@@ -113,7 +113,9 @@ enough.
 - Before a pull request, also as the `## Closing check` section of its body. In the owner's own
   repositories a hook refuses `gh pr create` and `gh pr merge` without a filled section (also one
   whose part 5 holds a `[limitation]` or `[nothing]`), and the merge while an item is still
-  `[open with owner]`.
+  `[open with owner]`. A pull request Dependabot opened and wrote every commit of needs no list;
+  a commit authored by anyone else on its branch (a fix, a merge of main) brings the list back,
+  so ask Dependabot to rebase (`@dependabot rebase`) rather than merging main in.
 - At a handover, also into the handover note.
 - To the coordinating session, where one exists, before asking it for a slot for an expensive
   run.

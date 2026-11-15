@@ -103,13 +103,14 @@ out=$(printf 'Du kannst jetzt /clear machen.\0Die Tests laufen grün.\0## Closin
 run=$((run + 1))
 [[ $out == $'1\n0\n0' ]] || { fail=$((fail + 1)); echo "FAIL batch mode printed: ${out//$'\n'/ }"; }
 
-# A Stop hook runs at the end of every turn: a long message stays fast
+# A Stop hook runs at the end of every turn: a long message stays fast. It takes 1 to 2 s on a busy
+# machine (measured 2026-11-15); the limit leaves room for load and still catches a blow-up.
 long=$(printf 'Ich habe den Parser umgebaut, die Tests laufen grün und die Doku ist nachgezogen. %.0s' $(seq 1 700))
 start=$(date +%s%N)
 stop pass "$long"
 ms=$((($(date +%s%N) - start) / 1000000))
 echo "timing: message of ${#long} bytes: $ms ms"
-((ms < 2000)) || { fail=$((fail + 1)); echo "FAIL a message of ${#long} bytes took $ms ms"; }
+((ms < 5000)) || { fail=$((fail + 1)); echo "FAIL a message of ${#long} bytes took $ms ms"; }
 
 echo "$run cases, $fail failed"
 ((fail == 0))

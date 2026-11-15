@@ -163,6 +163,7 @@ Run the dry run first and read it. The installer takes over what you had:
 | No Claude attribution in commits and pull requests (`attribution`) | yes | – |
 | Plugins: feature-dev, code-review, claude-md-management, frontend-design (skillspector 0 to 13, `plugins/VENDORED.md`) | yes | – |
 | Global skills `grilling` and `grill-me` (an interview that stress-tests a plan) and `closing-check` (a fixed list of what a piece of work left open, checked by a second reader) | yes | – |
+| A nudge for the closing check when a session offers a handover or a `/clear` (`closing-check-nudge.sh`, Stop hook) | yes | – |
 | Spinner tips off, unused claude.ai skills off | yes | – |
 | Bash timeouts raised to 5 minutes (default) and 20 minutes (maximum) | yes | yes |
 
@@ -280,9 +281,9 @@ one, copy `templates/recommended/skills/closing-check` into its `skills/` folder
 skillspector, take the closing-check lines of `templates/recommended/CLAUDE.md` ("Evidence" and
 "Heavy runs") into its `CLAUDE.md` and the `PreToolUse` entry with the matcher
 `mcp__.*__(create|merge)_pull_request` of `templates/recommended/settings.json` into its
-`settings.json` (without it, the GitHub MCP tools pass unchecked), and run `install.ps1` again:
-the installer links the skill into every profile, and from then on `guard-git.sh` asks your pull
-requests for the section.
+`settings.json` (without it, the GitHub MCP tools pass unchecked), add its `Stop` entry for the
+nudge if you want it, and run `install.ps1` again: the installer links the skill into every
+profile, and from then on `guard-git.sh` asks your pull requests for the section.
 
 ## Language servers
 
@@ -395,7 +396,10 @@ newer Roslyn. `install.ps1` checks the plugin's start script, not the `csharp-ls
   body holds no filled `## Closing check` section: `gh pr create` in every body form, `gh api`
   creating one (REST or GraphQL) and the MCP tool `create_pull_request`; and the merge of one
   whose body (read with `gh pr view`, the one call that reaches the network) has no filled
-  section or still an item `[open with owner]`, also when gh cannot read it. The refusal gives
+  section or still an item `[open with owner]`, also when gh cannot read it; a pull request
+  Dependabot opened and wrote every commit of carries no such section, so only the merge question
+  applies to it (a commit authored by anyone else on its branch, a merge of main too, makes it
+  checked; `@dependabot rebase` keeps it Dependabot's own). The refusal gives
   the section's skeleton; other people's repositories and setups without the skill are not
   asked. Permission rules in `settings.json` match the start of a command only
   (`Bash(git push --force*)` misses `git -C dir push --force`); this hook does not match the
@@ -404,15 +408,17 @@ newer Roslyn. `install.ps1` checks the plugin's start script, not the `csharp-ls
   passes. Tests: `bash hooks/guard-git.test.sh`.
 - `hooks/closing-check-nudge.sh` is a Stop hook: when the session's last message offers a
   handover or a `/clear`, or says the session is done, and shows no `## Closing check`, it asks
-  once for the closing check (or for "it was no such offer"); the second stop always passes. It
-  is not switched on in the templates. Measured on local transcripts on two fresh samples of 40
-  offers each, labelled by a reader who had not seen its phrases, it caught 26 and 27 of 40
-  (recall 0.650 and 0.675) at a precision of 46 of 50 nudges (0.920); the bar for switching it on
-  is a recall of 0.80 and a precision of 0.85. `scripts/measure-closing-nudge.py` repeats the
-  measurement on your own transcripts and prints counts only (`--show`, for the one labelling,
-  prints the messages it names). To try it anyway, add a `Stop`
-  entry with `bash ~/.claude/hooks/closing-check-nudge.sh`. Tests:
-  `bash hooks/closing-check-nudge.test.sh`.
+  once for the closing check (or for "it was no such offer"); the second stop always passes.
+  The recommended template registers it. Measured on local transcripts on two fresh samples of
+  40 offers each, labelled by a reader who had not seen its phrases, it caught 26 and 27 of 40
+  (recall 0.650 and 0.675) at a precision of 46 of 50 nudges (0.920): it misses about a third of
+  the offers, and a false alarm costs one short turn. The bar first set for switching it on (a
+  recall of 0.80) was missed; the repository owner switched it on regardless.
+  `scripts/measure-closing-nudge.py` repeats the measurement on your own transcripts and prints
+  counts only (`--show`, for the one labelling, prints the messages it names); remove the `Stop`
+  entry if its nudges cost you more than they catch. It is a `Stop` hook without a matcher, and
+  it uses `hooks/lib/command-segments.sh` too, but lets every stop pass without it: a nudge is no
+  guard. Tests: `bash hooks/closing-check-nudge.test.sh`.
 - `hooks/block-commit-secrets.sh` is a PreToolUse hook for Bash and PowerShell that scans what a
   `git commit` would take (the staged changes; with `-a` or paths also the unstaged ones; with a
   `git add` in the same command also the files it adds, with `git add -f` ignored ones too) for
@@ -437,13 +443,12 @@ newer Roslyn. `install.ps1` checks the plugin's start script, not the `csharp-ls
   Git Bash). If the library is missing or broken, each of the five blocks every call it would
   check with a message
   saying so, rather than letting commands through unchecked; restore the folder (`git checkout`,
-  then `install.ps1`). The closing-check nudge uses the library too, but lets every stop pass
-  without it: a nudge is no guard. Register
+  then `install.ps1`). Register
   each for the matcher `Bash|PowerShell` in your configuration's `settings.json`, like the two
   above. That matcher covers the Monitor tool too: Claude Code hands a Monitor call to every hook
   matched on `Bash` as a Bash call with the same command (measured with Claude Code 2.1.321), so
   the shell hooks need no `Monitor` matcher. The templates register the commit secret scan and
-  the read guard (both) and the git guard (`recommended`,
+  the read guard (both), the git guard and the closing-check nudge (`recommended`,
   which also turns attribution off). Neither registers the remote-access guard: refusing every
   server is a personal policy, so add it yourself if it is yours.
 - `statusline/statusline.sh` shows the account, the model, `⦿ remote` while Remote Control is
