@@ -107,15 +107,52 @@ enough.
    list lacks or gets wrong, not a second list.
 4. Work its findings into the list before you show it, and say that the second reader ran.
 
+## The chat view
+
+The owner reads what is left, not what is done. In the chat, show only this view, always in this
+shape, in the chat's language (for a German chat the blocks are "Deine Entscheidung", "Im Auge
+behalten" and "Bewusst weggelassen"):
+
+```
+## Closing check
+Checked: 8 parts, 23 items done, second reader ran. Full list: <where it is>.
+
+### Your decision
+**1. <short title>**
+What it is about: <the facts the owner needs, with numbers and links>.
+My recommendation: <what you would do, and why, in one or two sentences>.
+
+### Keep an eye on
+**2. <short title>**
+What it is about: ...
+My recommendation: ...
+
+### Dropped on purpose
+**3. <short title>**
+Reason: ...
+```
+
+- **Your decision**: every `[open with owner]` item, a decision or an action only the owner can
+  take, and every item nobody could place.
+- **Keep an eye on**: `[limitation]` and `[issue #<n>]` items that arose in this piece of work.
+  A limit that was already written down before is not repeated.
+- **Dropped on purpose**: `[dropped]` items the owner has not already agreed to, with the reason.
+- Number the items across all blocks, so the owner can answer "1 yes, 2 later". Leave out a block
+  with nothing in it. With nothing left at all, the view is the heading and one line:
+  "Nothing open; all 8 parts checked, second reader ran." The header line names the number of
+  done items and where the full list is, so the owner can look without reading it here.
+
 ## Where the list goes
 
-- Always in the chat.
-- Before a pull request, also as the `## Closing check` section of its body. In the owner's own
-  repositories a hook refuses `gh pr create` and `gh pr merge` without a filled section (also one
-  whose part 5 holds a `[limitation]` or `[nothing]`), and the merge while an item is still
-  `[open with owner]`. A pull request Dependabot opened and wrote every commit of needs no list;
-  a commit authored by anyone else on its branch (a fix, a merge of main) brings the list back,
-  so ask Dependabot to rebase (`@dependabot rebase`) rather than merging main in.
-- At a handover, also into the handover note.
-- To the coordinating session, where one exists, before asking it for a slot for an expensive
-  run.
+- In the chat: the chat view above, never the full list.
+- The full list, in the form above:
+  - before a pull request, as the `## Closing check` section of its body. In the owner's own
+    repositories a hook refuses `gh pr create` and `gh pr merge` without a filled section (also
+    one whose part 5 holds a `[limitation]` or `[nothing]`), and the merge while an item is still
+    `[open with owner]`. A pull request Dependabot opened and wrote every commit of needs no
+    list; a commit authored by anyone else on its branch (a fix, a merge of main) brings the list
+    back, so ask Dependabot to rebase (`@dependabot rebase`) rather than merging main in;
+  - at a handover, into the handover note;
+  - otherwise into a file in the session's scratchpad, which the chat view's header line names;
+  - to the coordinating session, where one exists, before asking it for a slot for an
+    expensive run.
