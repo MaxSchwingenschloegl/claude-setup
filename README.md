@@ -6,7 +6,8 @@ set up with two clones and one script.
 
 **What lives here:** the tools: the installer (`install.ps1`), the PowerShell functions that
 switch accounts (`shell/`, `scripts/`), a plugin scan (`scripts/vet-plugins.ps1`), a check of
-the machine (`scripts/check-setup.ps1`), guards
+the machine (`scripts/check-setup.ps1`) with a cleanup of stale plugin records
+(`scripts/prune-plugin-installs.ps1`), guards
 for secrets, searches, git commands, commits and server access (`hooks/`), a status line (`statusline/`), skill groups as plugins you
 enable per project (`plugins/`) and two templates for your own configuration (`templates/`).
 **What never lives here:** your configuration. Accounts, settings, rules and global skills live
@@ -141,7 +142,8 @@ Run the dry run first and read it. The installer takes over what you had:
   `~/.claude/plugins/installed_plugins.json`). Do not remove those with
   `claude plugin uninstall --scope project` from the home folder: the project settings it edits
   are that same `settings.json`, so it may switch the plugin off everywhere (not tried for an
-  enabled plugin).
+  enabled plugin). `.\scripts\prune-plugin-installs.ps1` removes them instead, with every Claude
+  Code session closed (see *Checking a machine*).
 - **`claude plugin install` and `uninstall` rewrite `settings.json`** with its keys in another
   order, so your configuration can show a long `git diff` although nothing changed but the order.
   If every removed line comes back elsewhere (give or take a trailing comma),
@@ -490,6 +492,12 @@ to the repositories when named like a worktree of one (`<repo>-<name>`). It look
 the folder this repo is in, or the one given with `-ReposDir`. Run it from the checkout
 `install.ps1` linked; from a worktree it checks that worktree instead and says so. Exit code 1
 means something needs a look.
+
+`.\scripts\prune-plugin-installs.ps1` removes the plugin records of project folders that are gone
+and of your home folder from `~/.claude/plugins/installed_plugins.json` (`-KeepHome` keeps the
+home folder's, `-DryRun` only lists). Every other record stays, the old file is kept as
+`installed_plugins.json.backup-<time>`, and it refuses to write while a Claude Code session runs,
+since a running session can write its own view of the file back. Close all of them first.
 
 ## Uninstall
 

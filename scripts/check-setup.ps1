@@ -170,8 +170,8 @@ if ($records) {
 }
 foreach ($key in $byProject.Keys | Sort-Object) {
     $path = $key -replace ' \((project|local)\)$'
-    $mark = if ((Get-ClaudeFullPath $path) -eq (Get-ClaudeFullPath $env:USERPROFILE)) { ' [home folder: a session started there; README, "Things to know"]' }
-            elseif (-not (Test-Path -LiteralPath $path)) { ' [folder gone]' }
+    $mark = if ((Get-ClaudeFullPath $path) -eq (Get-ClaudeFullPath $env:USERPROFILE)) { ' [home folder: a session started there; README, "Things to know"; scripts\prune-plugin-installs.ps1 removes it]' }
+            elseif (-not (Test-Path -LiteralPath $path)) { ' [folder gone; scripts\prune-plugin-installs.ps1 removes it]' }
     Note "Installed for $key$mark`: $(($byProject[$key] | Sort-Object) -join ', ')"
 }
 
