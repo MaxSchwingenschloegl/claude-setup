@@ -219,6 +219,8 @@ records the results in your configuration's `vetting.json`. Commit that file wit
 - `install.ps1` warns about every enabled plugin without a scan, changed since its scan, or above
   50 or incomplete without an approval. `-InstallPlugins` installs only plugins whose scan
   matches what the marketplace would install.
+- `vet-plugins.ps1` ends with exit code 1 when a plugin could not be scanned, or is above 50 or
+  incomplete without an approval, so a script that calls it can stop there.
 - Some plugins, the language servers among them, declare their servers, hooks or commands in the
   marketplace entry instead of their folder (`"strict": false`). Those fields count toward the
   fingerprint, so a change is noticed, but skillspector scans only the folder: read the entry in

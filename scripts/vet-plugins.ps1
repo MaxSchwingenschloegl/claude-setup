@@ -15,6 +15,9 @@
     install.ps1 warns about plugins without a matching scan, and -InstallPlugins installs only
     plugins whose scan matches what the marketplace would install.
 
+    Exit code 1 means something needs a look: a plugin that could not be scanned, or one above
+    the score limit or with an incomplete scan and no approval.
+
     Every LLM call of skillspector's semantic analysis goes through the local claude CLI
     (SKILLSPECTOR_PROVIDER=claude_cli, unless you set another provider) and counts against
     your plan. Claude Code keeps a transcript folder for each of those calls in the shared
@@ -138,6 +141,7 @@ New-Item -ItemType Directory -Force $reports | Out-Null
 $today = Get-Date -Format 'yyyy-MM-dd'
 $changed = $false
 $rows = @()
+$failed = @()   # plugins that could not be scanned; they set the exit code
 
 try {
     foreach ($name in $names) {
@@ -152,12 +156,13 @@ try {
                 $why = if ($source) { 'it comes from a remote repository. Install it with claude plugin install, then run this again before you start a session' }
                        else { 'its marketplace is not on this machine. Add it with claude plugin marketplace add <owner/repo> (settings.json, extraKnownMarketplaces, names it), then run this again' }
                 Write-Warning "${name}: not installed and not scanned; $why."
+                $failed += $name
                 continue
             }
             $folder = $source.Folder; $version = 'not installed'; $commit = $null
         }
         try { $hash = Get-PluginHash $folder $name }
-        catch { Write-Warning "Could not read the files of ${name}: $($_.Exception.Message)"; continue }
+        catch { Write-Warning "Could not read the files of ${name}: $($_.Exception.Message)"; $failed += $name; continue }
 
         if ($old -and $old.hash -eq $hash -and -not $Force) {
             # Same files as scanned: only the version label may have moved on
@@ -188,10 +193,11 @@ try {
         if (-not (Test-Path -LiteralPath $file) -or (Get-Item -LiteralPath $file).Length -eq 0) {
             Remove-Item -LiteralPath $file -ErrorAction SilentlyContinue
             Write-Warning "skillspector could not scan ${name} (exit code $exitCode): $(@($output | Where-Object { $_ -notmatch 'WARNING \[skillspector' }) -join ' ')"
+            $failed += $name
             continue
         }
         try { $result = Read-Report $file }
-        catch { Write-Warning "Could not read the report of ${name} (${file}): $($_.Exception.Message)"; continue }
+        catch { Write-Warning "Could not read the report of ${name} (${file}): $($_.Exception.Message)"; $failed += $name; continue }
         if (-not $result.complete) {
             Write-Warning ("${name}: the scan is incomplete ($($result.analysis)). A large plugin can run out of skillspector's " +
                            'time limit, SKILLSPECTOR_MAX_WORKFLOW_SECONDS (600 by default); raise it and scan again with -Force.')
@@ -240,3 +246,7 @@ if ($open.Count) {
     Write-Host '  Read every finding in the report. If each is harmless, add "approved" (the date) and "reasons" to the' -ForegroundColor Yellow
     Write-Host '  entry in vetting.json; otherwise disable the plugin in settings.json and uninstall it.' -ForegroundColor Yellow
 }
+if ($failed.Count) {
+    Write-Host "Not scanned: $($failed -join ', '). See the warnings above." -ForegroundColor Yellow
+}
+if ($failed.Count -or $open.Count) { exit 1 }
