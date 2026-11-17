@@ -173,12 +173,20 @@ try {
         Write-Host "Scanning $name ($version) ..."
         $file = Join-Path $reports "$(($name -split '@')[0])-$($version -replace '[^\w.-]', '_').json"
         if (Test-Path -LiteralPath $file) { Remove-Item -LiteralPath $file }
-        $ErrorActionPreference = 'Continue'   # skillspector logs warnings on stderr
-        $output = skillspector scan $folder --format json --output $file 2>&1
-        $exitCode = $LASTEXITCODE
-        $ErrorActionPreference = 'Stop'
-        # Exit code 2 with a report means an incomplete run, which is recorded as such
-        if (-not (Test-Path -LiteralPath $file)) {
+        # skillspector refuses --output on Windows ("Safe file output is unsupported on this
+        # platform") and asks for stdout to be redirected instead. Start-Process writes the
+        # bytes as they come; a PowerShell pipe or `>` would re-encode the JSON report.
+        $errorFile = "$file.stderr"
+        $process = Start-Process -FilePath (Get-Command skillspector).Source -NoNewWindow -Wait -PassThru `
+            -ArgumentList @('scan', "`"$folder`"", '--format', 'json') `
+            -RedirectStandardOutput $file -RedirectStandardError $errorFile
+        $exitCode = $process.ExitCode
+        $output = @(Get-Content -LiteralPath $errorFile -ErrorAction SilentlyContinue)
+        Remove-Item -LiteralPath $errorFile -ErrorAction SilentlyContinue
+        # Exit code 2 with a report means an incomplete run, which is recorded as such; the
+        # redirect creates the file in any case, so a failed run leaves it empty
+        if (-not (Test-Path -LiteralPath $file) -or (Get-Item -LiteralPath $file).Length -eq 0) {
+            Remove-Item -LiteralPath $file -ErrorAction SilentlyContinue
             Write-Warning "skillspector could not scan ${name} (exit code $exitCode): $(@($output | Where-Object { $_ -notmatch 'WARNING \[skillspector' }) -join ' ')"
             continue
         }
