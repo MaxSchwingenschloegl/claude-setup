@@ -168,6 +168,7 @@ Run the dry run first and read it. The installer takes over what you had:
 | A nudge for the closing check when a session offers a handover or a `/clear` (`closing-check-nudge.sh`, Stop hook) | yes | – |
 | Spinner tips off, unused claude.ai skills off | yes | – |
 | Bash timeouts raised to 5 minutes (default) and 20 minutes (maximum) | yes | yes |
+| No Python byte-code cache written by Claude Code's processes, so a Python plugin keeps the fingerprint it was scanned with (`PYTHONDONTWRITEBYTECODE`) | yes | yes |
 
 Neither template turns on auto mode (`permissions.defaultMode: "auto"`); Claude asks before acting
 until you decide otherwise. Language, theme, model and effort are left to you: set them with
@@ -232,6 +233,21 @@ records the results in your configuration's `vetting.json`. Commit that file wit
 - Most official plugins have no version of their own and take the marketplace's commit as one,
   which changes with every marketplace update. The fingerprint does not, so an update that left a
   plugin alone needs no new scan.
+- Claude Code's own files in a plugin's folder stay out of the fingerprint: its lock files
+  (`.in_use/<process id>`) and its mark `.orphaned_at` (a time stamp in the top folder). Python's
+  byte-code cache does not: Python checks a time-stamp `.pyc` only against its source's time stamp
+  and size, never its content, and runs a `.pyc` that stands where its source would be without any
+  source, so a cache left out would be code nobody scanned. A Python plugin that ran once would
+  then read as changed, and an approval made on one machine would not match another, so the
+  templates set `PYTHONDONTWRITEBYTECODE=1`: an import in Python started by Claude Code writes no
+  cache (measured for hooks in `settings.json` and a plugin's own `hooks.json`), but still reads
+  caches that exist. pip, `compileall` and `python -I` or `-E` write one anyway, so a plugin that
+  installs packages into its own folder still reads as changed; Python you start yourself is not
+  affected. Caches written before the setting stay, and `check-setup.ps1` points at them. Deleting
+  them is safe, as Python compiles from the source again, but a scan or approval taken on a copy
+  that held them then no longer matches and needs a new scan:
+  `Get-ChildItem $HOME\.claude\plugins\cache -Recurse -Directory -Force -Filter __pycache__ | Remove-Item -Recurse -Force`.
+  Tests: `powershell -NoProfile -File scripts\plugins.test.ps1`.
 
 skillspector itself, and how to get scans comparable with the scores in `vetting.json` and
 `plugins/VENDORED.md`:

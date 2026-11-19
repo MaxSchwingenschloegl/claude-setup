@@ -149,6 +149,9 @@ $states = foreach ($plugin in $enabled) {
     $verdict = Get-FolderVerdict $vetting $plugin $folder
     if ($verdict -ne 'ok') {
         Report "Enabled plugin $plugin, $($PluginVerdictText[$verdict]): scan it with scripts\vet-plugins.ps1 before the next session (README, `"Vetting plugins`")."
+        if ($verdict -eq 'changed' -and (Get-ChildItem -LiteralPath $folder -Recurse -Directory -Force -Filter __pycache__ -ErrorAction SilentlyContinue)) {
+            Note "  $plugin holds Python's byte-code cache (__pycache__), which counts toward the fingerprint. Unless its scan was taken on this copy with that cache in it, delete those folders and run this again; if it then reads as scanned, they were the only change (README, `"Vetting plugins`")."
+        }
     }
     "$plugin ($($PluginVerdictText[$verdict]))"
 }

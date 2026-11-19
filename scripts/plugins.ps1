@@ -149,9 +149,14 @@ function Read-CaseSensitiveJson([string]$Path) {
 }
 
 # Fingerprint of a plugin folder: every file's path and content. Claude Code's lock files
-# (.in_use/<process id>) are left out and CRLF counts as LF, so neither a running session nor a
-# checkout with other line endings changes it, and a marketplace update that left the plugin
-# alone keeps it. A lone carriage return still counts: some parsers read it as a line break.
+# (.in_use/<process id>) and its mark .orphaned_at (the time in milliseconds, in the top folder,
+# written when it no longer needs a version) are left out and CRLF counts as LF, so neither a
+# running session nor a checkout with other line endings changes it, and a marketplace update that
+# left the plugin alone keeps it. A lone carriage return still counts: some parsers read it as a
+# line break. Python's byte-code cache counts like every other file: Python checks a time-stamp
+# .pyc only against its source's time stamp and size, never its content, and runs a .pyc that
+# stands where its source would be without any source, so a .pyc left out would be code nobody
+# scanned (README, "Vetting plugins", on PYTHONDONTWRITEBYTECODE).
 # The fields of the marketplace entry $Name that load or run something count too.
 function Get-PluginHash([string]$Path, [string]$Name) {
     $root = (Get-ClaudeFullPath $Path) + '\'
@@ -159,8 +164,13 @@ function Get-PluginHash([string]$Path, [string]$Name) {
     $sha = [Security.Cryptography.SHA256]::Create()
     $lines = [string[]]@(foreach ($file in Get-ChildItem -LiteralPath $Path -Recurse -File -Force) {
         $relative = $file.FullName.Substring($root.Length).Replace('\', '/')
-        if ($relative -cmatch '^\.in_use/\d+$') { continue }
-        $bytes = $latin1.GetBytes($latin1.GetString([IO.File]::ReadAllBytes($file.FullName)).Replace("`r`n", "`n"))
+        # [0-9], not \d, which in .NET also takes other scripts' digits; \z, not $, which also
+        # matches before a final line break. A lock file holds a few bytes of JSON.
+        if ($relative -cmatch '^\.in_use/[0-9]{1,10}\z' -and $file.Length -le 4096) { continue }
+        if ($relative -ceq '.orphaned_at' -and $file.Length -le 20 -and
+            [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($file.FullName)) -cmatch '^[0-9]{1,20}\z') { continue }
+        $raw = [IO.File]::ReadAllBytes($file.FullName)
+        $bytes = $latin1.GetBytes($latin1.GetString($raw).Replace("`r`n", "`n"))
         "$relative $([BitConverter]::ToString($sha.ComputeHash($bytes)).Replace('-', ''))"
     })
     $entry = if ($Name) { (Get-MarketplaceEntry $Name).Entry }
