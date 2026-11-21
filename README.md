@@ -404,7 +404,8 @@ newer Roslyn. `install.ps1` checks the plugin's start script, not the `csharp-ls
   `--squash`); bulk staging (`git add -A`, `.`, `:/`, `-u`, the repository root, an
   exclude-only pathspec, `git commit -a`); skipped git hooks (`--no-verify`, `git commit -n`,
   setting `core.hooksPath`); force pushes in every form (`--force`, `-fu`,
-  `--force-with-lease`, `+branch`, `--mirror`, deleting main), and a pull request updated by
+  `--force-with-lease`, `+branch`, `--mirror`, deleting main, a long option also in any prefix
+  git takes for it, such as `--force-w`), and a pull request updated by
   rebase, which rewrites its pushed branch on GitHub (`gh pr update-branch --rebase`, the
   GraphQL `updatePullRequestBranch` with `REBASE`); and a commit on main: `commit`,
   `cherry-pick`, `revert`, `am`, `merge`, `pull` and `rebase` while the repository the command
@@ -426,8 +427,10 @@ newer Roslyn. `install.ps1` checks the plugin's start script, not the `csharp-ls
   section or still an item `[open with owner]`, also when gh cannot read it; a pull request
   Dependabot opened and wrote every commit of carries no such section, so only the merge question
   applies to it (a commit authored by anyone else on its branch, a merge of main too, makes it
-  checked; `@dependabot rebase` keeps it Dependabot's own). The refusal gives
-  the section's skeleton; other people's repositories and setups without the skill are not
+  checked; `@dependabot rebase` keeps it Dependabot's own). Nothing inside an HTML comment
+  counts, as GitHub shows none of it, so a template may keep example items in one (a `<!--` in
+  a code block or on a line with a backtick stays text, which can only count more). The refusal
+  gives the section's skeleton; other people's repositories and setups without the skill are not
   asked. Permission rules in `settings.json` match the start of a command only
   (`Bash(git push --force*)` misses `git -C dir push --force`); this hook does not match the
   command text either: it splits compound commands outside quotes and here-documents and looks

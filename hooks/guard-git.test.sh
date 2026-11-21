@@ -730,6 +730,40 @@ check 0 Bash 'git push -u origin HEAD' "$f"
 check 0 Bash 'git push origin feat/x' "$m"
 check 0 Bash 'git switch -c feat/y && git push -u origin HEAD' "$m"
 check 0 Bash 'git push --tags origin' "$m"
+# git takes any unambiguous prefix of a long option and pushes with it (measured with git 2.31:
+# --force-w rewrote the remote branch, --mi mirrored, --de deleted); an ambiguous one such as
+# --forc or --force- it refuses itself, so nothing is pushed
+check 2 Bash 'git push --force-w origin feature' "$f"
+check 2 Bash 'git push --force-wi origin feature' "$f"
+check 2 Bash 'git push --force-with origin feature' "$f"
+check 2 Bash 'git push --force-with-l=feature origin feature' "$f"
+check 2 PowerShell 'git push --force-w origin feature' "$f"
+check 2 Bash 'git push --mi' "$f"
+check 2 Bash 'git push --m origin' "$f"
+check 2 Bash 'git push --de origin main' "$f"
+check 2 Bash 'git push origin --dele main' "$f"
+check ask Bash 'git push --al origin' "$f"
+check ask Bash 'git push --br origin' "$f"
+check 0 Bash 'git push --dr origin main' "$m"
+check 0 Bash 'git push --ta origin' "$m"
+check 0 Bash 'git push --forc origin feature' "$f"
+check 0 Bash 'git push --force- origin feature' "$f"
+check 0 Bash 'git push --force-i origin feature' "$f"
+check 0 Bash 'git push --pu ci.skip origin feature' "$f"
+check ask Bash 'git push --pu ci.skip origin main' "$f"
+check ask Bash 'git push --pu=ci.skip origin main' "$f"
+check 0 Bash 'git push --forcex origin feature' "$f"
+# An option that takes a value takes the next word, written out or abbreviated; a negation undoes
+# its option, so the push it leaves is judged; after -- nothing is an option
+check ask Bash 'git push --pu ci.skip origin' "$m"
+check ask Bash 'git push --rece x origin' "$m"
+check ask Bash 'git push --recurse-submodules check origin' "$m"
+check ask Bash 'git push --recu check origin' "$m"
+check ask Bash 'git push -n --no-dry-run origin main' "$f"
+check ask Bash 'git push --dry-run --no-dr origin main' "$f"
+check ask Bash 'git push --tags --no-tags' "$m"
+check ask Bash 'git push -d --no-delete origin HEAD' "$m"
+check 0 Bash 'git push origin -- --mi' "$f"
 # A dry run pushes nothing, so it is not asked
 check 0 Bash 'git push --dry-run' "$m"
 check 0 Bash 'git push -n' "$m"
@@ -806,6 +840,45 @@ form ok "${filled//$'\n'/$'\r\n'}"
 crlf=${filled/- \[done\] part 2 walked, see commit 3b13627/- [done] 123456789}
 form "item too short in part 2" "${crlf//$'\n'/$'\r\n'}"
 form "placeholder in part 1" "$skeleton"
+# An HTML comment renders as nothing, so nothing inside one counts: a template's example items, an
+# item hidden from the reader, a heading; an unclosed one hides the rest, as GitHub shows it
+item2='- [done] part 2 walked, see commit 3b13627'
+form ok "${filled/'## Closing check'/$'## Closing check\n<!-- How to fill it:\n  - [done] an example item\n  - [state] text\n-->'}"
+form ok "${filled/'## Closing check'/$'<!-- ## Closing check -->\n## Closing check'}"
+form "part 2 has no item" "${filled/"$item2"/"<!-- $item2 -->"}"
+form "part 2 has no item" "${filled/"$item2"/$'<!--\n'"$item2"$'\n-->'}"
+form ok "${filled/"$item2"/"$item2 <!-- a note -->"}"
+form "placeholder in part 2" "${filled/"$item2"/"$item2 <!-- a note --> TODO"}"
+form ok "${filled/"$item2"/"$item2"$'\n<!--\n## Notes\n- [x] a note\n-->'}"
+form "part 3 missing" "${filled/"$item2"/"$item2"$'\n<!-- never closed'}"
+form "part 2 has no item" "${filled/"$item2"/"<!-- a --> <!-- $item2 -->"}"
+form none "$filled"$'<!-- - [open with owner] a hidden decision -->' open
+form none "$filled"$'<!--\n- [open with owner] a hidden decision\n-->' open
+form ok "${filled/"$item2"/"<!-- a -->$item2<!-- b -->"}"
+form "placeholder in part 2" "${filled/"$item2"/"$item2 <!-- a --> TODO <!-- b -->"}"
+# A comment inside a line ends there or is text: GitHub shows what follows, items included
+spill=$'- [done] the parser now strips <!-- comments, see 3b13627\n- [open with owner] keep the retry or drop it\n- [done] a stray --> alone is kept as text'
+form ok "${filled/"$item2"/"$spill"}"
+form '- [open with owner] keep the retry or drop it' "${filled/"$item2"/"$spill"}" open
+form ok "${filled/"$item2"/"- [done] the template now says <!-- is literal, see 3b13627"}"
+form "placeholder in part 2" "${filled/"$item2"/"$item2 <!-- TODO"}"
+form ok "${filled/"$item2"/"$item2 <!-- TODO later -->"}"
+form "placeholder in part 2" "${filled/"$item2"/"$item2 <!--> TODO -->"}"
+form "placeholder in part 2" "${filled/"$item2"/"$item2 <!---> TODO -->"}"
+# In a fenced code block and in a line with a code span, <!-- is text GitHub shows
+form '- [open with owner] decide on the release' "$filled"$'```html\n<!-- template start\n```\n- [open with owner] decide on the release' open
+form '- [open with owner] decide on the release' "$filled"$'~~~\n  <!-- template start\n~~~\n- [open with owner] decide on the release' open
+form none "$filled"$'```\nx\n```\n<!--\n- [open with owner] a hidden decision\n-->' open
+form ok "${filled/"$item2"/'- [done] a `<!--` ends at `-->`'}"
+# <!--> and <!---> are whole comments: the line holding them ends the comment
+form '- [open with owner] decide on the release' "$filled"$'<!-->\n- [open with owner] decide on the release' open
+form '- [open with owner] decide on the release' "$filled"$'<!--->\n- [open with owner] decide on the release' open
+# A body written in PowerShell, with CRLF line ends
+crlfc=${filled/'## Closing check'/$'## Closing check\n<!-- How to fill it:\n  - [done] an example item\n-->'}
+form ok "${crlfc//$'\n'/$'\r\n'}"
+crlfh=${filled/"$item2"/$'<!--\n'"$item2"$'\n-->'}
+form "part 2 has no item" "${crlfh//$'\n'/$'\r\n'}"
+form '- [open with owner] a decision that shows' "$filled"$'- [open with owner] a decision that shows\n<!-- a note -->' open
 form "no '## Closing check' heading" "## Summary
 1. Questions to the owner
 - [done] nothing was asked in this session"

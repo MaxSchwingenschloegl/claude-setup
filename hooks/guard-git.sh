@@ -36,7 +36,9 @@
 #   Reading it (`git config core.hooksPath`, --get) stays allowed.
 # - Rewriting the remote: `git push` with --force, -f (also in -fu), --force-with-lease[=...],
 #   --mirror, a +refspec, or deleting main (`:main`, `+:main`, --delete/-d main; it gets its own
-#   reason, as the merge path does not apply there); `gh pr update-branch
+#   reason, as the merge path does not apply there); each long option of git push also in any
+#   prefix git takes for it (--force-w, --mi, --de), and --no-dry-run, --no-tags and --no-delete
+#   undo what they name; `gh pr update-branch
 #   --rebase` and the GraphQL updatePullRequestBranch with updateMethod REBASE, which rebase the
 #   pushed branch on GitHub's side. Plain `gh pr update-branch` merges main in and stays allowed.
 # - A commit on main: `git commit`, `cherry-pick`, `revert`, `am`, `merge`, `pull` and `rebase`
@@ -63,7 +65,8 @@
 #   create_pull_request. Filled: a line `## Closing check`, then the parts 1. to 8. in order up
 #   to the next `## ` heading, each with at least one item `- [<state>] <text>` (done, open with
 #   owner, issue #<n>, limitation, dropped, or `- [nothing] checked by ...`), no placeholder
-#   (<...>, TODO, TBD, FIXME), and no [limitation] or [nothing] in part 5. The merge of such a
+#   (<...>, TODO, TBD, FIXME), and no [limitation] or [nothing] in part 5; nothing inside an HTML
+#   comment counts, as GitHub shows none of it. The merge of such a
 #   pull request (`gh pr merge`, the MCP tool merge_pull_request) is refused when its body, read
 #   with `gh pr view` (the one process this hook starts, and only there), holds no filled section,
 #   still an item [open with owner], or cannot be read within GUARD_GIT_GH_TIMEOUT seconds
@@ -99,32 +102,36 @@
 # no branch), and other default branches than main. The branch is rebuilt from the command text, so
 # each form git knows and this list does not is a gap; git's own hooks would see the real ref, but
 # core.hooksPath belongs to each repository, so a global one cannot sit beside them;
-# abbreviated long options other than --no-veri/--no-verif (`--reuse` for
+# abbreviated long options other than --no-veri/--no-verif and those of git push (`--reuse` for
 # --reuse-message among them); a commit made through the GitHub MCP tools; for the closing check,
 # a merge through `gh api` (asked, its body not read), a pull request created in another tool,
 # the owner's own `!` commands, which pass no hook, and a repository a `git clone` earlier on the
 # same line makes (`git clone url x && cd x && gh pr create` is judged by the repository above
-# x); aliases, scripts, variables. It is a
+# x); for a push from main without a refspec, a cd that the shell does not make for it but the
+# hook follows (`cd x | cat; git push`, `cd x & git push`, `env cd x; git push`,
+# `a=$(cd x); git push`); aliases, scripts, variables. It is a
 # guard against accidents, not against a determined attacker.
-# Blocked although harmless: a commit message, pull request or issue text that quotes an
+# Blocked although harmless: `git push` with --no-force, --no-force-with-lease or --no-all after the
+# option it undoes, which still counts; a commit message, pull request or issue text that quotes an
 # attribution line (a text about this hook, say); `git add -A --dry-run`; a gh api call naming
-# updatePullRequestBranch that passes another value starting with "rebase" (`-f b='Rebase ...'`);
-# a plain `git pull` on main that could only fast-forward (pull.ff=only, or no commit of main's
-# own): the hook does not read git's configuration, and the reason names `git pull --ff-only`;
-# `git rebase --skip` and `git am --skip` on main, which go on committing there (`--abort` ends
-# them); a `git switch` in a folder made by `mkdir` on the same line, whose commit is then judged
-# by the repository above it; a commit after a switch away from main joined by ; || & or a line
-# break (`git switch -c x; git commit`), as the switch may have failed, which in Windows
-# PowerShell, which has no &&, takes a call of its own for the commit; one that still runs only
-# after the switch worked, which the count along the line does not see: inside a group or an
-# if (`git switch -c x && { git add a; git commit; }`, `if git switch -c x; then git commit; fi`),
-# after `|| exit 1;`, or after `bash -c "a; b"` within the && chain; a commit after
-# `git switch main || ...`, which runs only when the switch failed; a filled closing check the
-# hook cannot see: a `gh api` body read from a file (`--input pr.json`, `-F body=@pr.md`), a PowerShell body built with `n escapes
-# (pass it with --body-file or a here-string), a section inside a command substitution, and
-# `gh pr edit --body-file x && gh pr merge` on one line (the body is read before the line runs);
-# a `- [x]` checklist right after part 8 without a `## ` heading between, read as part 8's items
-# without a state.
+# updatePullRequestBranch that passes another value starting with "rebase" (`-f b='Rebase ...'`); a
+# plain `git pull` on main that could only fast-forward (pull.ff=only, or no commit of main's own):
+# the hook does not read git's configuration, and the reason names `git pull --ff-only`; `git rebase
+# --skip` and `git am --skip` on main, which go on committing there (`--abort` ends them); a `git
+# switch` in a folder made by `mkdir` on the same line, whose commit is then judged by the
+# repository above it; a commit after a switch away from main joined by ; || & or a line break (`git
+# switch -c x; git commit`), as the switch may have failed, which in Windows PowerShell, which has
+# no &&, takes a call of its own for the commit; one that still runs only after the switch worked,
+# which the count along the line does not see: inside a group or an if (`git switch -c x && { git
+# add a; git commit; }`, `if git switch -c x; then git commit; fi`), after `|| exit 1;`, or after
+# `bash -c "a; b"` within the && chain; a commit after `git switch main || ...`, which runs only
+# when the switch failed; a filled closing check the hook cannot see: a `gh api` body read from a
+# file (`--input pr.json`, `-F body=@pr.md`), a PowerShell body built with `n escapes (pass it with
+# --body-file or a here-string), a section inside a command substitution, and `gh pr edit
+# --body-file x && gh pr merge` on one line (the body is read before the line runs); a `- [x]`
+# checklist right after part 8 without a `## ` heading between, read as part 8's items without a
+# state; a comment in the section that a browser ends with `--!>`, read on to the next `-->`, which
+# can hide an item GitHub shows.
 # Rephrase, or ask the user.
 # Tests: hooks/guard-git.test.sh
 
@@ -152,12 +159,48 @@ CC_PLACEHOLDER='(^|[^[:alnum:]])<[a-z][a-z ]*>|(^|[^[:alnum:]_])(TODO|TBD|FIXME)
 # indented under another; a second heading starts the section anew (a title that is the heading
 # itself comes before the body). Part 5 (routine steps) takes no [limitation] or [nothing]: a step
 # that was not run stays open with the owner until they drop it, which is how "live verification:
-# not run" reached a merge.
+# not run" reached a merge. An HTML comment renders as nothing, so nothing in it counts (a
+# template's example items, a hidden item, a heading), read as CommonMark does: one over several
+# lines starts only at a line that begins with <!-- (up to three spaces in) and runs to the first
+# line holding --> (<!--> on that line too), or to the end; one inside a line must close there, or
+# its <!-- is text. Text after the --> that ends a comment still counts. Inside a fenced code block
+# (``` or ~~~) a <!-- is text, and a line with a backtick keeps an inline comment as text, as a code
+# span may hold one: either can only count more than GitHub shows, never hide an item it shows.
+CC_BLOCK_COMMENT='^ {0,3}<!--'
+CC_FENCE='^ {0,3}(```|~~~)'
 closing_check_parse() {
-    local line item part=0 items=0 found=0 state text
+    local line item part=0 items=0 found=0 state text incomment=0 rest fence=
     CC_DEFECT= CC_OPEN=
     while IFS= read -r line; do
         line=${line%$'\r'}
+        if ((incomment)); then
+            [[ $line == *'-->'* ]] || continue
+            line=${line#*-->}
+            incomment=0
+        elif [[ $line =~ $CC_FENCE ]]; then
+            if [[ -z $fence ]]; then
+                fence=${BASH_REMATCH[1]}
+            elif [[ ${BASH_REMATCH[1]} == "$fence" ]]; then
+                fence=
+            fi
+        elif [[ -z $fence && $line =~ $CC_BLOCK_COMMENT ]]; then
+            [[ $line == *'-->'* ]] || { incomment=1; continue; }
+            line=${line#*-->}
+        fi
+        while [[ -z $fence && $line != *'`'* && $line == *'<!--'* ]]; do
+            rest=${line#*<!--}
+            if [[ $rest == '>'* ]]; then
+                rest=${rest#>}
+            elif [[ $rest == '->'* ]]; then
+                rest=${rest#->}
+            elif [[ $rest == *'-->'* ]]; then
+                rest=${rest#*-->}
+            else
+                break
+            fi
+            line=${line%%<!--*}$rest
+        done
+        [[ -z ${line//[[:space:]]/} ]] && continue
         if [[ $line =~ ^'## Closing check'[[:space:]]*$ ]]; then
             found=1 part=0 items=0
             CC_DEFECT= CC_OPEN=
@@ -772,19 +815,64 @@ repo_flag_owner() {
     REPLY=${v##*/}
 }
 
+# The long options of git push (2.31, and --branches, the newer gits' name for --all). git takes
+# any prefix of one that names no other (--force-w for --force-with-lease, --mi for --mirror, --de
+# for --delete, --no-dr for --no-dry-run; measured with git 2.31) and refuses an ambiguous one
+# (--forc, --force-) without pushing.
+PUSH_LONG=(all atomic branches delete dry-run exec follow-tags force force-if-includes
+    force-with-lease ipv4 ipv6 mirror no-verify porcelain progress prune push-option quiet
+    receive-pack recurse-submodules repo set-upstream signed tags thin verbose verify)
+
+# REPLY: long option $1 written out when it is a prefix of exactly one of PUSH_LONG, or after
+# --no- of exactly one (a value after = kept), else $1 as it is. A full name that begins another
+# one (--force) is kept by that rule.
+push_long() {
+    local name=${1%%=*} value= n hit= neg=
+    name=${name#--}
+    [[ $1 == *=* ]] && value==${1#*=}
+    REPLY=$1
+    for n in "${PUSH_LONG[@]}"; do
+        if [[ $n == "$name"* ]]; then
+            [[ -n $hit ]] && return 0
+            hit=$n
+        fi
+    done
+    if [[ -z $hit && $name == no-?* ]]; then
+        neg=no- name=${name#no-}
+        for n in "${PUSH_LONG[@]}"; do
+            if [[ $n == "$name"* ]]; then
+                [[ -n $hit ]] && return 0
+                hit=$n
+            fi
+        done
+    fi
+    [[ -n $hit ]] && REPLY=--$neg$hit$value
+    return 0
+}
+
 check_push() {
-    local i k c a r dst del=0 force= all= tags=0 dry=0
+    local i k c a r dst del=0 force= all= tags=0 dry=0 ended=0
     local -a pos=()
     for ((i = 0; i < ${#args[@]}; i++)); do
         a=${args[i]}
+        # after -- every word is the remote or a refspec
+        if ((ended)); then
+            pos+=("$a")
+            continue
+        fi
+        [[ $a == --?* ]] && { push_long "$a"; a=$REPLY; }
         case $a in
+            --) ended=1 ;;
             --mirror) force_push "$a" ;;
             --force | --force-with-lease | --force-with-lease=*) force=${force:-$a} ;;
             --delete) del=1 ;;
+            --no-delete) del=0 ;;
             --all | --branches) all=$a ;;
             --tags) tags=1 ;;
+            --no-tags) tags=0 ;;
             --dry-run) dry=1 ;;
-            --repo | --receive-pack | --exec | --push-option) ((i++)) ;;
+            --no-dry-run) dry=0 ;;
+            --repo | --receive-pack | --exec | --push-option | --recurse-submodules) ((i++)) ;;
             --*) ;;
             -?*)
                 for ((k = 1; k < ${#a}; k++)); do
