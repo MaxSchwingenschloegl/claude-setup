@@ -271,20 +271,26 @@ PATH=$saved_path
 # Large commands stay well inside the timeout: a hook that times out lets the commit go unchecked
 # The limit catches a return of the old quadratic split (47 s and more at 30 KB), with room for a
 # busy machine: these commands take about 2 s under load, so a tighter limit only adds flaky runs.
+# One run over the limit is measured again: a moment of load (one red run on 2026-11-15, during a
+# mutant run; none in 20 runs on 2026-11-21, which took 0.9 to 1.8 s each) cannot fail it, a slow
+# split fails both runs.
 timed() {  # name, limit in ms, expected exit, command: the hook process alone is timed
-    local name=$1 limit=$2 value=$4 cwd start ms got
+    local name=$1 limit=$2 value=$4 cwd start ms got try
     cwd=$(cygpath -w "$r")
     cwd=${cwd//\\/\\\\}
     value=${value//\\/\\\\}
     value=${value//\"/\\\"}
     value=${value//$'\n'/\\n}
     printf '%s' "{\"session_id\":\"t\",\"cwd\":\"$cwd\",\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"$value\"}}" > "$tmp/payload.json"
-    start=$(date +%s%N)
-    bash "$hook" < "$tmp/payload.json" > /dev/null 2>&1
-    got=$?
-    ms=$((($(date +%s%N) - start) / 1000000))
+    for try in 1 2; do
+        start=$(date +%s%N)
+        bash "$hook" < "$tmp/payload.json" > /dev/null 2>&1
+        got=$?
+        ms=$((($(date +%s%N) - start) / 1000000))
+        echo "timing: $name: $ms ms, exit $got"
+        [[ $got == "$3" ]] && ((ms >= limit)) && ((try == 1)) || break
+    done
     run=$((run + 1))
-    echo "timing: $name: $ms ms, exit $got"
     if [[ $got != "$3" ]] || ((ms >= limit)); then
         fail=$((fail + 1))
         echo "FAIL $name: expected exit $3 within $limit ms"

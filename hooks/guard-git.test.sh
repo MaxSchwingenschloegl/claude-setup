@@ -791,7 +791,15 @@ for i in $(seq 1 400); do long+="print('git add -A in line $i of a long patch sc
 long+="EOF"
 start=$SECONDS
 check 0 Bash "$long"
-((SECONDS - start < 5)) || { fail=$((fail + 1)); echo "FAIL a long command took $((SECONDS - start)) s"; }
+secs=$((SECONDS - start))
+if ((secs >= 5)); then
+    # measured again, as timed() below does: a moment of load cannot fail it, a slow split can
+    start=$SECONDS
+    check 0 Bash "$long"
+    run=$((run - 1))
+    secs=$((SECONDS - start))
+fi
+((secs < 5)) || { fail=$((fail + 1)); echo "FAIL a long command took $secs s"; }
 
 # Closing check form: the section a pull request body needs before it is created or merged.
 # GUARD_GIT_SELFTEST=form reads a text on stdin and prints ok or the first defect; =open prints
@@ -1245,8 +1253,10 @@ dep_says '@dependabot rebase'
 # Large commands stay well inside the timeout: a hook that times out lets the command run unchecked
 # The limit catches a return of the old quadratic split (47 s and more at 30 KB), with room for a
 # busy machine: these commands take about 2 s under load, so a tighter limit only adds flaky runs.
+# One run over the limit is measured again: a moment of load cannot fail it, a slow split is slow
+# both times (as in block-commit-secrets.test.sh).
 timed() {  # name, limit in ms, expected exit, tool, command: the hook process alone is timed
-    local name=$1 limit=$2 value=$5 cwd json start ms got
+    local name=$1 limit=$2 value=$5 cwd json start ms got try
     cwd=$(cygpath -w "$repo")
     cwd=${cwd//\\/\\\\}
     value=${value//\\/\\\\}
@@ -1254,12 +1264,15 @@ timed() {  # name, limit in ms, expected exit, tool, command: the hook process a
     value=${value//$'\n'/\\n}
     json="{\"session_id\":\"t\",\"cwd\":\"$cwd\",\"hook_event_name\":\"PreToolUse\",\"tool_name\":\"$4\",\"tool_input\":{\"command\":\"$value\"}}"
     printf '%s' "$json" > "$tmp/payload.json"
-    start=$(date +%s%N)
-    bash "$hook" < "$tmp/payload.json" > /dev/null 2>&1
-    got=$?
-    ms=$((($(date +%s%N) - start) / 1000000))
+    for try in 1 2; do
+        start=$(date +%s%N)
+        bash "$hook" < "$tmp/payload.json" > /dev/null 2>&1
+        got=$?
+        ms=$((($(date +%s%N) - start) / 1000000))
+        echo "timing: $name: $ms ms, exit $got"
+        [[ $got == "$3" ]] && ((ms >= limit)) && ((try == 1)) || break
+    done
     run=$((run + 1))
-    echo "timing: $name: $ms ms, exit $got"
     if [[ $got != "$3" ]] || ((ms >= limit)); then
         fail=$((fail + 1))
         echo "FAIL $name: expected exit $3 within $limit ms"
