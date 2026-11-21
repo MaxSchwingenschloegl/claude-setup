@@ -44,6 +44,10 @@ this repo
   its own profile for that account.
 - Every new shell checks the default account's links, and `claude-<account>` checks that
   account's, with a warning when one has turned into a plain file.
+- `hooks/` and `statusline/` of this checkout are the ones every session runs, through the
+  junctions, uncommitted edits included. Change them in a worktree
+  (`git worktree add ../claude-setup-<topic> -b <branch> origin/main`) and keep this checkout on
+  a clean `main`: a half-done guard can block every shell call in every session.
 
 ## Requirements
 
@@ -405,11 +409,14 @@ newer Roslyn. `install.ps1` checks the plugin's start script, not the `csharp-ls
   GraphQL `updatePullRequestBranch` with `REBASE`); and a commit on main: `commit`,
   `cherry-pick`, `revert`, `am`, `merge`, `pull` and `rebase` while the repository the command
   acts on has main checked out (read from its `HEAD` file, worktrees included, and followed
-  through a `git switch` or `git checkout` earlier on the line), except the forms that make no
-  commit (`--ff-only`, `--abort`, `--squash`, `--dry-run` and the like) and the first commit of a
-  fresh repository. A push to main (also a bare `git push` or `git push origin HEAD` from main,
-  `--all`, `--branches`, the matching refspec `:` and a wildcard over the branches; not a dry
-  run) and the merge of a pull
+  through a `git switch` or `git checkout` earlier on the line; joined by `;`, `||`, `&` or a
+  line break the switch may have failed, so the branch before it counts too, as it does for a
+  command in backquotes among the switch's words, which runs first; in Windows PowerShell, which
+  has no `&&`, a commit after a switch from main takes a call of its own), except the forms that
+  make no commit (`--ff-only`, `--abort`, `--squash`, `--dry-run` and the like) and the first
+  commit of a fresh repository. A push to main (also a bare `git push` or `git push origin HEAD`
+  from main, `--all`, `--branches`, the matching refspec `:` and a wildcard over the branches;
+  not a dry run) and the merge of a pull
   request (`gh pr merge`, `gh api .../merge`, the GitHub MCP tool `merge_pull_request`) it puts
   to you as a permission question. Once the `closing-check` skill is installed, it also refuses a
   pull request in one of your own repositories (its owner is the user gh is logged in as) whose

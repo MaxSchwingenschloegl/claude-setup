@@ -44,7 +44,10 @@
 #   unless a word of theirs says they make no commit (check_commit lists them: --ff-only, --abort,
 #   --quit, --squash, --no-commit, --dry-run and more). The branch is read from the HEAD file
 #   (.git/HEAD, or the one in the folder a worktree's or submodule's .git file names), and a
-#   `git switch` or `git checkout` earlier on the same line moves it for the commands after it. An
+#   `git switch` or `git checkout` earlier on the same line moves it for the commands after it;
+#   after ; || & a backquote or a line break that ends the command, the switch may have failed,
+#   so the branch before it counts as well (main if either one is; an && chain of switches counts
+#   from the branch before its first link). An
 #   unborn main (before the first commit of a fresh repository) is not judged, nor is a folder a
 #   `git init`, `git clone` or `git worktree add` earlier on the line makes; any other folder that
 #   does not exist yet belongs to the repository above it.
@@ -87,10 +90,13 @@
 # quoted word or piped in (`echo '{...}' | gh api graphql --input -`); a plain `git push` from
 # another branch whose upstream is main; for a commit on main, a repository chosen with GIT_DIR,
 # --git-dir or --work-tree, `git checkout <file>` for a file that does not exist yet (read as a
-# switch to a branch of that name), `git switch -` and `git checkout -` (the branch before is not
-# known), `git branch -m` of the branch checked out, a switch inside a subshell (taken as if it
-# lasted to the end of the line), a reftable repository (git 2.45+, whose HEAD file names no
-# branch), and other default branches than main. The branch is rebuilt from the command text, so
+# switch to a branch of that name), `git switch -`, `git checkout -` and `@{-N}` (the branch
+# before is not known), `git branch -m` of the branch checked out, a switch inside a subshell or a
+# pipeline (taken as if it lasted to the end of the line), a commit inside a `$(...)` among the
+# switch's own words (`git switch -c x $(git commit)`, which runs before the switch; the same
+# with backquotes is caught), a PowerShell backtick inside a word (``git com`mit``, which
+# PowerShell drops and the hook keeps), a reftable repository (git 2.45+, whose HEAD file names
+# no branch), and other default branches than main. The branch is rebuilt from the command text, so
 # each form git knows and this list does not is a gap; git's own hooks would see the real ref, but
 # core.hooksPath belongs to each repository, so a global one cannot sit beside them;
 # abbreviated long options other than --no-veri/--no-verif (`--reuse` for
@@ -107,8 +113,14 @@
 # own): the hook does not read git's configuration, and the reason names `git pull --ff-only`;
 # `git rebase --skip` and `git am --skip` on main, which go on committing there (`--abort` ends
 # them); a `git switch` in a folder made by `mkdir` on the same line, whose commit is then judged
-# by the repository above it; a filled closing check the hook cannot see: a `gh api` body read
-# from a file (`--input pr.json`, `-F body=@pr.md`), a PowerShell body built with `n escapes
+# by the repository above it; a commit after a switch away from main joined by ; || & or a line
+# break (`git switch -c x; git commit`), as the switch may have failed, which in Windows
+# PowerShell, which has no &&, takes a call of its own for the commit; one that still runs only
+# after the switch worked, which the count along the line does not see: inside a group or an
+# if (`git switch -c x && { git add a; git commit; }`, `if git switch -c x; then git commit; fi`),
+# after `|| exit 1;`, or after `bash -c "a; b"` within the && chain; a commit after
+# `git switch main || ...`, which runs only when the switch failed; a filled closing check the
+# hook cannot see: a `gh api` body read from a file (`--input pr.json`, `-F body=@pr.md`), a PowerShell body built with `n escapes
 # (pass it with --body-file or a here-string), a section inside a command substitution, and
 # `gh pr edit --body-file x && gh pr merge` on one line (the body is read before the line runs);
 # a `- [x]` checklist right after part 8 without a `## ` heading between, read as part 8's items
@@ -336,6 +348,12 @@ is_main() {
 # same line moved it to. @unborn for a main without a commit yet, empty for a detached HEAD or a
 # branch that is not known.
 declare -A BRANCH_OF=()
+# For the last switch in each repository: the branch before it (main when that may have been
+# main) and the separator count CS_SEPS when it ran. A separator other than && after it means the
+# switch may have failed, and the commands after it may run on the branch before it.
+declare -A SWITCH_PREV=() SWITCH_AT=()
+# 1 when on_main found main only as the branch before a switch that may have failed
+ON_UNSURE=0
 # The folders a `git init`, `git clone` or `git worktree add` earlier on the line makes a
 # repository of, in norm_path's spelling: git reads their own HEAD, not the repository's above
 declare -a MADE=()
@@ -362,9 +380,13 @@ repo_of() {
 # in the folder its .git file names (`gitdir: ...`, absolute or relative). A main without a commit
 # yet (a fresh repository) counts as no main until a commit on the line makes it born: neither its
 # ref, nor packed-refs, nor the ref log exists yet. Nothing more is read, as packed-refs can hold
-# megabytes.
+# megabytes. Also true when main is only the branch before a switch on the line that may have
+# failed (see SWITCH_PREV); ON_UNSURE then says so, for the reason a refusal gives.
 # shortcut: HEAD is read as a file, so a reftable repository (git 2.45+, whose HEAD file names no
 # branch) is not judged; upgrade when one is used here.
+# shortcut: "may have failed" counts separators along the line (CS_SEPS) and keeps the last switch
+# per repository, without reading groups, if/then or `|| exit`, so a commit there is refused
+# although it runs only after the switch worked; upgrade when one of these shows up in use.
 on_main() {
     ON_ROOT=
     repo_of "$1" || return 1
@@ -389,7 +411,16 @@ on_main() {
             BRANCH_OF[$r]=@unborn
         fi
     fi
-    [[ ${BRANCH_OF[$r],,} == main ]]
+    ON_UNSURE=0
+    [[ ${BRANCH_OF[$r],,} == main ]] && return 0
+    # The key is a folder name: copied out first, as bash expands a key inside (( )) a second time
+    # and would run a $(...) in it
+    local at=${SWITCH_AT[$r]-}
+    if [[ -n $at && ${SWITCH_PREV[$r],,} == main ]] && ((CS_SEPS > at)); then
+        ON_UNSURE=1
+        return 0
+    fi
+    return 1
 }
 
 # A `git switch` or `git checkout` moves the branch for the commands after it on the line: with
@@ -430,11 +461,21 @@ track_branch() {
     set_branch "$b"
 }
 
-# Records branch $1 as checked out where GIT_DIR_AT is, for the commands after it on the line;
-# nothing for a folder that does not exist yet
+# Records branch $1 as checked out where GIT_DIR_AT is, for the commands after it on the line,
+# and the branch before it for the case that the switch failed; nothing for a folder that does not
+# exist yet
 set_branch() {
     norm_path "$GIT_DIR_AT"
-    [[ -d $REPLY ]] && repo_of "$REPLY" && BRANCH_OF[$REPLY]=$1
+    [[ -d $REPLY ]] || return 0
+    local was=1
+    on_main "$REPLY" && was=0
+    [[ -n $ON_ROOT ]] || return 0
+    # A switch joined to the last one by && runs only when that one worked, so if main came before
+    # that one it still may have been checked out when the chain stopped
+    [[ ${SWITCH_PREV[$ON_ROOT],,} == main && ${SWITCH_AT[$ON_ROOT]-} == "$CS_SEPS" ]] && was=0
+    if ((was == 0)); then SWITCH_PREV[$ON_ROOT]=main; else SWITCH_PREV[$ON_ROOT]=${BRANCH_OF[$ON_ROOT]}; fi
+    SWITCH_AT[$ON_ROOT]=$CS_SEPS
+    BRANCH_OF[$ON_ROOT]=$1
     return 0
 }
 
@@ -522,7 +563,8 @@ check_commit() {
         done
         if [[ -n ${pos[1]} ]]; then
             local b=${pos[1],,}
-            is_main "$b" && commit_refused rebase
+            # this rebase lands on main whatever came before it, so no switch to blame
+            is_main "$b" && { ON_UNSURE=0; commit_refused rebase; }
             set_branch "${pos[1]}"
             return 0
         fi
@@ -533,7 +575,9 @@ check_commit() {
 }
 
 commit_refused() {
-    block "\`git $1\` would make a commit on main, and main moves only through a pull request or a fast-forward. Create a branch first (\`git switch -c <name>\`) and commit there. To bring main up to date: \`git merge --ff-only origin/main\` or \`git pull --ff-only\`."
+    local why="would make a commit on main"
+    ((ON_UNSURE)) && why="may make a commit on main: a switch before it on the line may have failed, which leaves main checked out. Join the two with && or, in Windows PowerShell, which has no &&, run it in a call of its own"
+    block "\`git $1\` $why, and main moves only through a pull request or a fast-forward. Create a branch first (\`git switch -c <name>\`) and commit there. To bring main up to date: \`git merge --ff-only origin/main\` or \`git pull --ff-only\`."
 }
 
 # The closing check is on once the closing-check skill is installed: people who never installed
@@ -769,7 +813,10 @@ check_push() {
         [[ $r == :* ]] && is_main "$dst" && force_push "$a"
         ((dry)) && continue
         [[ $r != :* ]] && is_main "$dst" && ask "A push to main changes the shared default branch. The user confirms it."
-        [[ $r == HEAD || $r == @ ]] && on_main "$GIT_DIR_AT" && ask "A push of HEAD from main goes to main, the shared default branch. The user confirms it."
+        if [[ $r == HEAD || $r == @ ]] && on_main "$GIT_DIR_AT"; then
+            ((ON_UNSURE)) && ask "A push of HEAD may go to main, the shared default branch: a switch before it on the line may have failed. The user confirms it."
+            ask "A push of HEAD from main goes to main, the shared default branch. The user confirms it."
+        fi
         # the matching refspec, and a wildcard over all branches, push main as well (not one over a
         # folder of them, refs/heads/feat/*); the reason names no refspec, as it goes into JSON
         if [[ $r == : || $dst == '*' || $dst == 'heads/*' || $dst == 'refs/heads/*' ]]; then
@@ -781,6 +828,7 @@ check_push() {
     [[ -n $all ]] && ask "git push $all pushes every branch, main included. The user confirms it."
     # Without a refspec git pushes the branch checked out, which on main is main
     if ((!tags && !del && ${#pos[@]} <= 1)) && on_main "$GIT_DIR_AT"; then
+        ((ON_UNSURE)) && ask "A push without a refspec may go to main, the shared default branch: a switch before it on the line may have failed. The user confirms it."
         ask "A push from main without a refspec goes to main, the shared default branch. The user confirms it."
     fi
     return 0

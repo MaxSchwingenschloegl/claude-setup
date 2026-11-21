@@ -565,7 +565,6 @@ check 0 Bash "cd $fm && git commit -m x" "$m"
 check 0 Bash 'git -C sub log' "$m"
 check 0 Bash 'echo "git commit -m x" && grep -r "git merge feature" .' "$m"
 check 0 Bash 'gh pr create --title "Fix the parser" --body "git commit on main"' "$m"
-check 0 PowerShell 'git switch -c feat/y; git commit -m x' "$m"
 check 0 PowerShell "Set-Location '$f'; git commit -m x" "$m"
 # The forms of these verbs that write no commit
 check 0 Bash 'git cherry-pick -n abc123' "$m"
@@ -620,6 +619,80 @@ check 2 Bash 'mkdir -p newdir && git -C newdir commit -m x' "$m"
 check 2 Bash 'git rebase feat/x main' "$f"
 check 2 Bash 'git rebase --onto origin/main HEAD~2 main' "$f"
 check 2 Bash 'git rebase --skip' "$m"
+# A switch that may have failed: after ; || & a backquote or a line break that ends the command,
+# the commands after it may run on the branch before it, so that one counts as well as the one
+# it switched to. Windows PowerShell 5.1 has no &&, so there the commit after a switch from main
+# takes a call of its own.
+check 2 Bash 'git checkout feat/typo; git commit -m x' "$m"
+check 2 Bash 'git checkout "feat/typo"; git commit -m x' "$m"
+# A command substitution runs before the command around it, so its commit still lands on main
+check 2 Bash 'git switch -c feat/y `git commit -m x`' "$m"
+check 2 Bash 'git checkout -b feat/y || git commit -m x' "$m"
+check 2 Bash 'git checkout -b feat/y
+git commit -m x' "$m"
+check 2 Bash 'git switch -c feat/y & git commit -m x' "$m"
+check 2 Bash 'bash -c "git checkout feat/typo; git commit -m x"' "$m"
+check 2 Bash 'git checkout -b feat/y; echo ok && git commit -m x' "$m"
+check 2 Bash 'git switch -c a; git switch -c b; git commit -m x' "$m"
+# An && chain of switches fails as a whole at its first link, so main from before it carries on
+check 2 Bash 'git switch -c b && git switch -c c; git commit -m x' "$m"
+check 2 Bash 'git checkout main && git switch -c y && git switch z; git commit -m x' "$f"
+# || ends the chain also at the end of a line, and so does a line break after a command
+check 2 Bash 'git switch -c feat/y ||
+  git commit -m x' "$m"
+check 2 Bash 'git switch -c feat/y && git add a.py
+git commit -m x' "$m"
+says 'would make a commit on main' 'git switch -c a; git switch -c b; git rebase origin/main main' "$m"
+# A folder name is data, never code: bash expands a key inside arithmetic a second time, so a
+# repository in a folder called x$(touch injmark)y must not make the hook run touch
+inj="$tmp/x\$(touch injmark)y"
+mkdir -p "$inj/.git/refs/heads"
+printf 'ref: refs/heads/main\n' > "$inj/.git/HEAD"
+printf '0123456789abcdef0123456789abcdef01234567\n' > "$inj/.git/refs/heads/main"
+check 2 Bash 'git switch -c y; git commit -m x' "$(cygpath -w "$inj")"
+run=$((run + 1))
+if [[ -e injmark || -e $inj/injmark ]]; then   # touch runs in the hook's folder, which is this one
+    fail=$((fail + 1))
+    echo "FAIL a folder name ran as a command (injmark exists)"
+    rm -f injmark "$inj/injmark"
+fi
+# Output redirected with &> and piped with |& stays inside the chain; a substitution or a subshell
+# after a switch keeps its separators to itself; in PowerShell & calls a command
+check 0 Bash 'git switch -c feat/y &>/dev/null && git commit -m x' "$m"
+check 0 Bash 'git switch -c feat/y && git diff |& tail -1 && git commit -m x' "$m"
+check 0 Bash 'git switch -c feat/y && echo `date` && git commit -m x' "$m"
+check 0 Bash 'git switch -c feat/y && x=$(git rev-parse HEAD; echo) && git commit -m x' "$m"
+check 0 Bash 'git switch -c feat/y && (
+  git commit -m x
+)' "$m"
+check 0 PowerShell 'git switch -c feat/y && & git commit -m x' "$m"
+check 2 Bash '(git checkout feat/typo; git commit -m x)' "$m"
+check 2 PowerShell 'git switch -c feat/y; git commit -m x' "$m"
+check ask Bash 'git switch -c feat/y; git push -u origin HEAD' "$m"
+says 'may have failed' 'git checkout feat/typo; git commit -m x' "$m"
+says 'call of its own' 'git checkout feat/typo; git commit -m x' "$m"
+check 2 Bash 'git checkout main; git commit -m x' "$f"
+# The other half: a switch the commit can only follow when it worked, or one from a branch to a
+# branch, where a failure leaves the commit on a branch either way
+check 0 Bash 'git checkout -b feat/y && echo ok && git commit -m x' "$m"
+check 0 Bash 'git switch -c a; git switch -c b && git commit -m x' "$m"
+check 0 Bash 'git checkout main; git checkout feat/x && git commit -m x' "$f"
+check 0 Bash 'git checkout feat/x; git commit -m x' "$f"
+check 0 Bash 'git fetch origin; git checkout -b feat/z; git commit -m x' "$f"
+check 0 Bash 'git switch -c feat/z | git commit -m x' "$f"
+check 0 PowerShell 'git switch -c feat/z; git commit -m x' "$f"
+check 0 Bash 'git fetch origin; git commit -m x' "$f"
+# An && or a pipe at the end of a line goes on with the next one, and a pipe inside the chain is
+# one link of it: the commit still runs only after the switch worked
+check 0 Bash 'git switch -c feat/y &&
+  git add a.py &&
+  git commit -m x' "$m"
+check 0 Bash 'git switch -c feat/y && git diff --stat | tail -1 && git commit -m x' "$m"
+check 0 Bash 'git switch -c feat/y && git diff |
+  tail -1 && git commit -m x' "$m"
+# Not covered, as before: a switch in a subshell or a pipeline counts on for the line
+check 0 Bash '(git switch -c feat/y) && git commit -m x' "$m"
+check 0 Bash 'git switch -c feat/y | git commit -m x' "$m"
 # The first commit makes main born: what follows on the line is judged as on main
 check 2 Bash 'git commit -m init && git commit -m second' "$(cygpath -w "$tmp/fresh")"
 check ask Bash 'git commit -m init && git push -u origin HEAD' "$(cygpath -w "$tmp/fresh")"

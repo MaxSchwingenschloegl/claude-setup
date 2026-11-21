@@ -28,6 +28,11 @@
 #               target in bash is read with its escapes (cd Team\ Files); cd - goes back to the
 #               folder before (CS_PREV), popd and Pop-Location to the one pushd left
 #               (CS_STACK), and either stays put when that is not known; cmd's cd /d X goes to X
+#     CS_SEPS   how many separators came before it on the line after which a command runs although
+#               the one before it failed (; || & a backquote, a line break that ends the command;
+#               not && | or a bracket, see _cs_count), those of a command line inside it
+#               (bash -c) included: a handler that remembers the count at one
+#               command sees at a later one whether that one runs only if the first succeeded
 #   command -v and -V run nothing, so no handler sees the program they name.
 #   A wrapper whose argument is a command line (bash/sh -c, cmd /c, powershell/pwsh -c or a bare
 #   command, wsl, watch "...") is unwrapped one level: CALLBACK sees the commands inside, not the
@@ -293,6 +298,33 @@ _cs_marker() {
     [[ -n $tok ]]
 }
 
+# Counts separator $1 in CS_SEPS when the command after it can run although the one before it
+# failed: ; || & (bash's background, not PowerShell's call operator) and a line break, but not &&
+# and not a pipe, which run their parts as links of one chain (so a switch in a pipeline counts on
+# for the line). A bracket keeps its separators to itself: `)` sets the count back to what it was
+# at `(`, so `x=$(a; b)` inside an && chain changes nothing after it. A backquote counts while its
+# substitution runs, which is before the command around it. A line break right after && || | or
+# ( (CS_LAST, the last separator, or w for a word) goes on with them.
+_cs_count() {
+    case $1 in
+        "$nl")
+            [[ $CS_LAST == '&&' || $CS_LAST == '||' || $CS_LAST == '|' || $CS_LAST == '|&' || $CS_LAST == '(' ]] && return 0
+            CS_SEPS=$((CS_SEPS + 1)) ;;
+        '&&' | '|' | '|&') ;;
+        '(') CS_PAREN+=("$CS_SEPS") ;;
+        ')')
+            if ((${#CS_PAREN[@]})); then
+                CS_SEPS=${CS_PAREN[-1]}
+                unset 'CS_PAREN[-1]'
+            fi ;;
+        '`')
+            if ((CS_BQ)); then CS_BQ=0; CS_SEPS=$((CS_SEPS - 1)); else CS_BQ=1; CS_SEPS=$((CS_SEPS + 1)); fi ;;
+        '&') [[ $sh == powershell ]] || CS_SEPS=$((CS_SEPS + 1)) ;;
+        *) CS_SEPS=$((CS_SEPS + 1)) ;;
+    esac
+    CS_LAST=$1
+}
+
 # Takes plain text $1 (no quotes, escapes, redirections or comments): its words join the current
 # command, its separators end it. The text is cut at the separators, and each piece becomes words
 # by one word splitting: per word, even two operations made a 60 KB command take seconds.
@@ -309,24 +341,28 @@ _cs_plain() {
         [[ -n $first || -n $r ]] && skip=0
     fi
     if [[ $r == *[\;\|\&\(\)$nl]* ]]; then
-        # && and || end a command without piping into the next, as ; does
-        r=${r//&&/$'\x1e;\x1e'}
-        r=${r//||/$'\x1e;\x1e'}
+        # && and || end a command without piping into the next, as ; does; they and the line
+        # break stay pieces of their own for CS_SEPS (_cs_count)
+        r=${r//&&/$'\x1d'}
+        r=${r//||/$'\x1c'}
+        r=${r//|&/$'\x1b'}
         r=${r//;/$'\x1e;\x1e'}
         r=${r//|/$'\x1e|\x1e'}
         r=${r//&/$'\x1e&\x1e'}
         r=${r//(/$'\x1e(\x1e'}
         r=${r//)/$'\x1e)\x1e'}
-        r=${r//$nl/$'\x1e;\x1e'}
+        r=${r//$nl/$'\x1e'$nl$'\x1e'}
+        r=${r//$'\x1d'/$'\x1e&&\x1e'}
+        r=${r//$'\x1c'/$'\x1e||\x1e'}
+        r=${r//$'\x1b'/$'\x1e|&\x1e'}
     fi
     IFS=$'\x1e'
     local -a pieces=($r)
     for piece in "${pieces[@]}"; do
         case $piece in
-            ';' | '&' | '|' | '(' | ')')
+            ';' | '&' | '|' | '|&' | '(' | ')' | '&&' | '||' | "$nl")
                 # _cs_end, inlined: a function call costs about 60 microseconds in Git Bash. A
-                # doubled separator (&&, ||, ;;) ends an empty command the second time; the second
-                # | of || drops what the first one piped.
+                # doubled separator (;;) ends an empty command the second time.
                 if ((${#words[@]})); then
                     # Only a command some handler or the dispatch itself cares about is dispatched
                     p=${words[0],,}
@@ -351,7 +387,7 @@ _cs_plain() {
                                 IFS=$'\x1e'
                             fi ;;
                     esac
-                    if [[ $piece == '|' ]]; then stdin_text="${words[*]}$nl${heredocs[*]}"; else stdin_text=; fi
+                    if [[ $piece == '|' || $piece == '|&' ]]; then stdin_text="${words[*]}$nl${heredocs[*]}"; else stdin_text=; fi
                     words=()
                     if ((marked)); then
                         seg_raw=()
@@ -360,16 +396,19 @@ _cs_plain() {
                     fi
                 else
                     stdin_text=
-                fi ;;
+                fi
+                _cs_count "$piece" ;;
             *__HERE*)
                 IFS=$' \t\r'
                 for p in $piece; do
                     _cs_marker "$p" && words+=("$REPLY")
                 done
+                CS_LAST=w
                 IFS=$'\x1e' ;;
             *)
                 IFS=$' \t\r'
                 words+=($piece)
+                [[ $piece == *[![:space:]]* ]] && CS_LAST=w
                 IFS=$'\x1e' ;;
         esac
     done
@@ -403,6 +442,8 @@ split_command() {  # text shell callback [depth]
     local -a HD=() words=() seg_raw=() heredocs=()
     local text buf="" blen=0 cpos=0 len win c run trail tok raw op skip=0 glued=0 marked=0 stdin_text=""
     local plain esc dq re_word re_sep re_redir
+    # a command line inside this one (bash -c, cmd /c) goes on counting the line's separators
+    ((depth)) || { CS_SEPS=0; CS_LAST=; CS_BQ=0; CS_PAREN=(); }
     _cs_extract "$1" "$sh"
     text=$REPLY
     case $sh in
@@ -433,6 +474,8 @@ split_command() {  # text shell callback [depth]
             cmd) run=${buf%%[\"^\<\>\#]*} ;;
             *) run=${buf%%[\'\"\`\\\<\>\#]*} ;;
         esac
+        # The & of &> and &>> belongs to the redirection below, not to the plain text as a separator
+        [[ $run == *'&' && ${buf:${#run}:1} == '>' && ${run: -2} != '&&' ]] && run=${run%'&'}
         if [[ -n $run ]]; then
             if ((${#run} < blen || cpos < len)); then
                 # Its last word may go on past it (into a quote, an escape, a 2>, the next chunk):
@@ -479,6 +522,7 @@ split_command() {  # text shell callback [depth]
             seg_raw[${#words[@]}]=$raw
             marked=1
             words+=("$tok")
+            CS_LAST=w
         else
             _cs_drop 1
             glued=0
@@ -499,6 +543,7 @@ _cs_end() {
     seg_raw=()
     heredocs=()
     marked=0
+    [[ -z $1 ]] || _cs_count "$1"
 }
 
 # REPLY: word $1 without one pair of enclosing quotes
