@@ -313,10 +313,12 @@ run `install.ps1` again: the installer links the skill into every profile, and f
 
 A language-server plugin (`pyright-lsp`, `typescript-lsp`, `csharp-lsp`, `rust-lsp`, …) gives
 Claude go-to-definition, references and the compiler's diagnostics after each edit. It only
-declares a program, which each machine installs itself; when that program is missing, Claude
-Code says nothing (not even in `--debug`) and the plugin does nothing. `install.ps1` therefore
-lists every server program it cannot find on PATH, for the plugins your `settings.json` enables
-and for every installed one, those a project installed for itself included. It installs none:
+declares a program, which each machine installs itself; when that program is missing, the
+plugin does nothing, and Claude Code names it only when the server is to start, at the first
+file of its kind a session opens ("couldn't start: its program ... wasn't found"). `install.ps1`
+therefore lists every server program a newly started program would not find, for the plugins
+your `settings.json` enables and for every installed one, those a project installed for itself
+included. It installs none:
 
 ```powershell
 npm i -g pyright typescript-language-server typescript   # pyright-lsp, typescript-lsp
@@ -325,8 +327,21 @@ dotnet tool install -g csharp-ls                          # csharp-lsp (current 
 ```
 
 With a Node version manager such as fnm the npm programs belong to its default Node version;
-install them again after switching it. The check uses the PATH of the shell that runs
-`install.ps1`, so run it from the same kind of shell you start Claude Code from.
+install them again after switching it. The check uses the PATH a program gets that no shell with
+your profile started (the machine's and your user PATH), as VS Code started from the Start menu
+gets it. fnm adds Node only in the profile (`fnm env`), so its programs are missing there, and
+`install.ps1` names a server it finds only in its own window. To have them found everywhere, add
+fnm's default version to your user PATH once: Win+R, `rundll32
+sysdm.cpl,EditEnvironmentVariables`, in the upper (user) part select `Path`, Edit, New,
+`%APPDATA%\fnm\aliases\default` (`%FNM_DIR%\aliases\default` if you moved fnm's folder), then OK
+in both windows; with no `Path` in the upper part, New there, name `Path`. This window keeps the
+other entries as they are and tells Windows at once. A PowerShell line through
+`[Environment]::GetEnvironmentVariable` and `SetEnvironmentVariable` instead reads the user PATH
+with every `%VARIABLE%` filled in and writes it back so, as a plain string. Its programs are then
+found by the shims there, which take the `node.exe` beside them; plain `node` stays whichever
+comes first. Then quit every VS Code window (a program that was running keeps the PATH it started
+with) and start it and Claude Code again. If you only ever start Claude Code from a shell with
+your profile, the warning does not apply to you.
 
 `rust-lsp` leaves `src-tauri/binaries` out of rust-analyzer's file watching
 (`files.exclude`). On Windows rust-analyzer holds one handle per folder it watches, and those

@@ -586,8 +586,12 @@ foreach ($verdict in @($open.Keys)) {
 }
 
 # 8. Language servers: a plugin that declares one starts a program this machine has to provide,
-#    and does nothing, without a word from Claude Code, when it is missing. Checked for the
-#    enabled plugins and for every installed one, those a project installed for itself included.
+#    and does nothing when it is missing (Claude Code names it only when the server is to start,
+#    at the first file of its kind a session opens). Checked for the enabled plugins and for
+#    every installed one, those a project installed for itself included, on the PATH a program
+#    gets that no shell with your profile started (Get-StartPath, Get-ServerReach): one found only
+#    in this window, such as through fnm in the profile, is missing for VS Code started from the
+#    Start menu.
 #    Nothing is installed: npm, rustup and dotnet are your decision.
 #    A plugin enabled but not installed is read from the local copy of its marketplace.
 $lspPlugins = @{}
@@ -597,7 +601,8 @@ foreach ($plugin in @($enabled) + @($anyScope.Keys)) {
     if ($folder -and -not (Test-Path -LiteralPath $folder)) { $folder = $null }
     $lspPlugins[$plugin] = $folder
 }
-$missingServers = @(); $uncheckedServers = @()
+$missingServers = @(); $uncheckedServers = @(); $shellOnlyServers = @()
+$startPath = Get-StartPath
 foreach ($plugin in $lspPlugins.Keys | Sort-Object) {
     $short = $plugin -replace '@.*'
     # Without its files only an entry that declares servers itself can be checked: a plugin
@@ -610,14 +615,25 @@ foreach ($plugin in $lspPlugins.Keys | Sort-Object) {
             if (-not $lspPlugins[$plugin]) { $uncheckedServers += "$short ($command)"; continue }
             $command = Join-Path $lspPlugins[$plugin] $command
         }
-        $present = if ([IO.Path]::IsPathRooted($command)) { Test-Path -LiteralPath $command -PathType Leaf }
-                   else { [bool](Get-Command $command -CommandType Application -ErrorAction SilentlyContinue) }
-        if (-not $present) { $missingServers += "$command ($short)" }
+        if ([IO.Path]::IsPathRooted($command)) {
+            if (-not (Test-Path -LiteralPath $command -PathType Leaf)) { $missingServers += "$command ($short)" }
+        } else {
+            switch (Get-ServerReach $command $startPath) {
+                'window' { $shellOnlyServers += "$command ($short)" }
+                'missing' { $missingServers += "$command ($short)" }
+            }
+        }
     }
 }
 if ($missingServers.Count) {
     Write-Warning ("Language servers not found on PATH: $($missingServers -join ', '). Those plugins do nothing " +
                    'until you install them (README, "Language servers").')
+}
+if ($shellOnlyServers.Count) {
+    Write-Warning ("Language servers found in this window only, not on the PATH a program gets that no shell with " +
+                   "your profile started, such as VS Code from the Start menu: $($shellOnlyServers -join ', '). " +
+                   'Something in your profile adds their folder, such as fnm; put it on your user PATH, or start ' +
+                   'Claude Code only from such a shell (README, "Language servers").')
 }
 if ($uncheckedServers.Count) {
     Write-Warning "Language servers not checked, neither the files nor the marketplace entry are on this machine: $($uncheckedServers -join ', ')."

@@ -107,6 +107,25 @@ try {
     } else {
         Write-Host 'skip the two cases with a real byte-code cache: no working python on PATH' -ForegroundColor Yellow
     }
+
+    # The language-server check: a program is looked up on the PATH given, and the start PATH is
+    # the registry's, so a folder only this window put on PATH (as fnm env does) is not in it
+    $tools = Join-Path $root 'tools'
+    New-Item -ItemType Directory -Force $tools | Out-Null
+    Set-Content -LiteralPath "$tools\fake-langserver.cmd" -Value '@echo off' -Encoding ASCII
+    Check 'a program in a folder on the PATH given is found' (Test-CommandOnPath 'fake-langserver' "C:\Windows;$tools")
+    Check 'the same program is not found on a PATH without that folder' (-not (Test-CommandOnPath 'fake-langserver' 'C:\Windows'))
+    Check 'a name is no wildcard: fake-* finds nothing' (-not (Test-CommandOnPath 'fake-*' "C:\Windows;$tools"))
+    $saved = $env:Path
+    try {
+        $env:Path = "$saved;$tools"
+        Check 'a folder only this window added is not on the start PATH' (-not ((Get-StartPath) -split ';' -contains $tools))
+        Check 'its program is reached in this window only' ((Get-ServerReach 'fake-langserver' (Get-StartPath)) -eq 'window')
+        Check 'on a start PATH with its folder it is reached there' ((Get-ServerReach 'fake-langserver' "$(Get-StartPath);$tools") -eq 'start')
+        Check 'the lookup leaves this window''s PATH as it was' ($env:Path -eq "$saved;$tools")
+    } finally { $env:Path = $saved }
+    Check 'a program nowhere is missing' ((Get-ServerReach 'fake-langserver-nowhere' (Get-StartPath)) -eq 'missing')
+    Check 'the start PATH holds the system folder' ((Get-StartPath) -split ';' -contains "$env:SystemRoot\system32")
 }
 finally {
     Remove-Item -Recurse -Force $root -ErrorAction SilentlyContinue

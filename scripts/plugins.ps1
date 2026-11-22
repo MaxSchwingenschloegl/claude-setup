@@ -83,12 +83,47 @@ function Get-PluginSource([string]$Name) {
 # commands live there instead of in its folder, so they belong to its fingerprint.
 $MarketplaceComponentFields = 'commands', 'agents', 'skills', 'hooks', 'mcpServers', 'lspServers', 'outputStyles'
 
+# The PATH a program gets that no shell with your profile started (VS Code started from the
+# Start menu, for one): the machine's and the user's PATH from the registry, in that order (.NET
+# expands a REG_EXPAND_SZ value, a REG_SZ one stays as it is, as Windows keeps it). A Node
+# version manager that adds its folder in the profile (fnm env) is missing there, and so are the
+# programs installed under it. A program that was already running keeps the PATH it started with
+# until it is quit.
+# shortcut: .NET fills a REG_EXPAND_SZ entry from this window's variables, not the logon's, so a
+# variable the profile sets or changes and a PATH entry uses (%NVM_SYMLINK%) is read with this
+# window's value; Get-Command uses this window's PATHEXT, and also takes an extensionless file
+# Windows cannot start. Upgrade by reading the raw values and filling them from the logon
+# environment when a case shows up.
+function Get-StartPath {
+    $parts = foreach ($scope in 'Machine', 'User') { [Environment]::GetEnvironmentVariable('Path', $scope) -split ';' }
+    @($parts | Where-Object { $_ }) -join ';'
+}
+
+# True when program $Name is found on $Path (folders separated by ;), as a process started with
+# that PATH finds it (PATHEXT included); the name is taken literally, not as a wildcard
+function Test-CommandOnPath([string]$Name, [string]$Path) {
+    $saved = $env:Path
+    try {
+        $env:Path = $Path
+        [bool](Get-Command -Name ([WildcardPattern]::Escape($Name)) -CommandType Application -ErrorAction SilentlyContinue)
+    } finally { $env:Path = $saved }
+}
+
+# Where language-server program $Name is: 'start' when a program started without your profile
+# finds it on $StartPath, 'window' when only this window finds it (its profile added the folder,
+# as fnm env does), 'missing' when neither does
+function Get-ServerReach([string]$Name, [string]$StartPath) {
+    if (Test-CommandOnPath $Name $StartPath) { return 'start' }
+    if (Get-Command -Name ([WildcardPattern]::Escape($Name)) -CommandType Application -ErrorAction SilentlyContinue) { return 'window' }
+    return 'missing'
+}
+
 # The programs a plugin's language servers start: declared in its marketplace entry
 # ("strict": false) or, when its folder is given, in its plugin.json or .lsp.json. lspServers
 # may be an object of servers, a path to a file holding one, or an array of both.
 # ${CLAUDE_PLUGIN_ROOT} is replaced by the folder. A declaration it cannot read is reported
-# instead of read as "no servers": Claude Code says nothing when a server's program is missing,
-# so the plugin then does nothing without a word.
+# instead of read as "no servers": the plugin then does nothing, and Claude Code names the
+# missing program only when the server is to start, at the first file of its kind.
 function Get-LspCommands([string]$Name, [string]$Folder) {
     $servers = [Collections.ArrayList]::new()
     $collect = {
