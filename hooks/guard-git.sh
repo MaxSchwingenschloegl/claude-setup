@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# PreToolUse hook (Bash, PowerShell, the GitHub MCP tools create_pull_request and
-# merge_pull_request): blocks git and gh commands of a shape the git rules forbid,
+# PreToolUse hook (Bash, PowerShell, the GitHub MCP tools create_pull_request, merge_pull_request,
+# create_or_update_file, push_files and delete_file): blocks git and gh commands of a shape the
+# git rules forbid, a file written to main through the MCP tools,
 # and asks the user before a push to main or the merge of a pull request. Rules alone are followed
 # most of the time, and permission rules in settings.json match a command's start only (they miss
 # `git -C dir push --force`); this is the hard stop for the rest. Plain bash on purpose, like
@@ -19,7 +20,9 @@
 #   in: the message for -C, -c, --reuse-message, --reedit-message and --fixup=amend:/reword:, the
 #   subject line for a plain --fixup and --squash), in `git merge`, `git tag` and `git notes`
 #   (-m/--message, a here-document, the file of -F/--file), in `gh pr ...`, `gh issue ...` and
-#   `gh release ...` (title, body, the file of --body-file/-F/--notes-file when it exists).
+#   `gh release ...` (title, body, the file of --body-file/-F/--notes-file when it exists), and in
+#   the commit message of the MCP tools create_or_update_file, push_files and delete_file (any
+#   server's, as it is a commit message wherever it lands).
 #   "CLAUDE.md" alone is no attribution.
 # - A Claude or Anthropic identity (either word in the name or the address, a person called
 #   Claude too): `git config user.name|user.email`, `git commit --author`, and the author a
@@ -52,7 +55,12 @@
 #   from the branch before its first link). An
 #   unborn main (before the first commit of a fresh repository) is not judged, nor is a folder a
 #   `git init`, `git clone` or `git worktree add` earlier on the line makes; any other folder that
-#   does not exist yet belongs to the repository above it.
+#   does not exist yet belongs to the repository above it. Through the GitHub MCP tools
+#   create_or_update_file, push_files and delete_file: a file written to branch main (also
+#   refs/heads/main), or to no branch in an input that names an owner and a repo, which the REST
+#   API writes to the default branch; every "branch" key counts, nested ones too (one of them
+#   also stands in for a missing top-level branch, which the official GitHub MCP server requires
+#   anyway), read without decoding \u escapes, like every JSON field here.
 # - A pull request without a filled closing check, once the closing-check skill is installed
 #   (${CLAUDE_CONFIG_DIR:-~/.claude}/skills/closing-check/SKILL.md) and only in a repository
 #   whose owner is the user gh is logged in as (`user:` in gh's hosts.yml, read as a file; the
@@ -103,7 +111,10 @@
 # each form git knows and this list does not is a gap; git's own hooks would see the real ref, but
 # core.hooksPath belongs to each repository, so a global one cannot sit beside them;
 # abbreviated long options other than --no-veri/--no-verif and those of git push (`--reuse` for
-# --reuse-message among them); a commit made through the GitHub MCP tools; for the closing check,
+# --reuse-message among them); a commit made through other GitHub MCP tools than the three file
+# tools or through the REST API (`gh api .../contents/...`), an attribution in the title or body
+# of a pull request, issue or comment written through the MCP tools, the MCP tool
+# delete_repository; for the closing check,
 # a merge through `gh api` (asked, its body not read), a pull request created in another tool,
 # the owner's own `!` commands, which pass no hook, and a repository a `git clone` earlier on the
 # same line makes (`git clone url x && cd x && gh pr create` is judged by the repository above
@@ -112,26 +123,27 @@
 # `a=$(cd x); git push`); aliases, scripts, variables. It is a
 # guard against accidents, not against a determined attacker.
 # Blocked although harmless: `git push` with --no-force, --no-force-with-lease or --no-all after the
-# option it undoes, which still counts; a commit message, pull request or issue text that quotes an
-# attribution line (a text about this hook, say); `git add -A --dry-run`; a gh api call naming
-# updatePullRequestBranch that passes another value starting with "rebase" (`-f b='Rebase ...'`); a
-# plain `git pull` on main that could only fast-forward (pull.ff=only, or no commit of main's own):
-# the hook does not read git's configuration, and the reason names `git pull --ff-only`; `git rebase
-# --skip` and `git am --skip` on main, which go on committing there (`--abort` ends them); a `git
-# switch` in a folder made by `mkdir` on the same line, whose commit is then judged by the
-# repository above it; a commit after a switch away from main joined by ; || & or a line break (`git
-# switch -c x; git commit`), as the switch may have failed, which in Windows PowerShell, which has
-# no &&, takes a call of its own for the commit; one that still runs only after the switch worked,
-# which the count along the line does not see: inside a group or an if (`git switch -c x && { git
-# add a; git commit; }`, `if git switch -c x; then git commit; fi`), after `|| exit 1;`, or after
-# `bash -c "a; b"` within the && chain; a commit after `git switch main || ...`, which runs only
-# when the switch failed; a filled closing check the hook cannot see: a `gh api` body read from a
-# file (`--input pr.json`, `-F body=@pr.md`), a PowerShell body built with `n escapes (pass it with
-# --body-file or a here-string), a section inside a command substitution, and `gh pr edit
-# --body-file x && gh pr merge` on one line (the body is read before the line runs); a `- [x]`
-# checklist right after part 8 without a `## ` heading between, read as part 8's items without a
-# state; a comment in the section that a browser ends with `--!>`, read on to the next `-->`, which
-# can hide an item GitHub shows.
+# option it undoes, which still counts; a GitHub MCP file write whose files list holds an empty
+# "branch" key next to a valid top-level one; a commit message, pull request or issue text that
+# quotes an attribution line (a text about this hook, say); `git add -A --dry-run`; a gh api call
+# naming updatePullRequestBranch that passes another value starting with "rebase" (`-f b='Rebase
+# ...'`); a plain `git pull` on main that could only fast-forward (pull.ff=only, or no commit of
+# main's own): the hook does not read git's configuration, and the reason names `git pull
+# --ff-only`; `git rebase --skip` and `git am --skip` on main, which go on committing there
+# (`--abort` ends them); a `git switch` in a folder made by `mkdir` on the same line, whose commit
+# is then judged by the repository above it; a commit after a switch away from main joined by ; || &
+# or a line break (`git switch -c x; git commit`), as the switch may have failed, which in Windows
+# PowerShell, which has no &&, takes a call of its own for the commit; one that still runs only
+# after the switch worked, which the count along the line does not see: inside a group or an if
+# (`git switch -c x && { git add a; git commit; }`, `if git switch -c x; then git commit; fi`),
+# after `|| exit 1;`, or after `bash -c "a; b"` within the && chain; a commit after `git switch main
+# || ...`, which runs only when the switch failed; a filled closing check the hook cannot see: a `gh
+# api` body read from a file (`--input pr.json`, `-F body=@pr.md`), a PowerShell body built with `n
+# escapes (pass it with --body-file or a here-string), a section inside a command substitution, and
+# `gh pr edit --body-file x && gh pr merge` on one line (the body is read before the line runs); a
+# `- [x]` checklist right after part 8 without a `## ` heading between, read as part 8's items
+# without a state; a comment in the section that a browser ends with `--!>`, read on to the next
+# `-->`, which can hide an item GitHub shows.
 # Rephrase, or ask the user.
 # Tests: hooks/guard-git.test.sh
 
@@ -272,7 +284,8 @@ tool=$REPLY
 case $tool in
     Bash) shell=bash ;;
     PowerShell) shell=powershell ;;
-    mcp__*__create_pull_request | mcp__*__merge_pull_request) shell=mcp ;;
+    mcp__*__create_pull_request | mcp__*__merge_pull_request | mcp__*__create_or_update_file | \
+        mcp__*__push_files | mcp__*__delete_file) shell=mcp ;;
     *) exit 0 ;;
 esac
 if [[ $shell != mcp ]]; then
@@ -1189,9 +1202,52 @@ api_creates_pr() {
 root_of=$'\x01'
 root=
 root_base=
+# FIELDS: every string value of key $1 in the input, at any depth (field reads the first only).
+# The rest after each value comes from the match itself: cutting it off with ${rest#*...} costs
+# time with the square of the input's size (9.7 s at 100 KB), past the hook's timeout.
+field_all() {
+    local re='"'"$1"'"[[:space:]]*:[[:space:]]*"((\\.|[^"\\])*)"(.*)' rest=$input s
+    FIELDS=()
+    while [[ $rest =~ $re ]]; do
+        s=${BASH_REMATCH[1]}
+        rest=${BASH_REMATCH[3]}
+        s=${s//\\\\/$'\x01'}
+        s=${s//\\\"/\"}
+        s=${s//\\n/$'\n'}
+        s=${s//\\t/$'\t'}
+        s=${s//\\r/}
+        s=${s//\\\//\/}
+        FIELDS+=("${s//$'\x01'/\\}")
+    done
+}
+
 # The GitHub MCP tools (any server's create_pull_request and merge_pull_request): their input
-# names the owner, and the body or the pull request's number
+# names the owner, and the body or the pull request's number. A file written or deleted through
+# them (create_or_update_file, push_files, delete_file) is a commit on GitHub's side: refused on
+# main in every repository, and with no branch when it names an owner and a repo (the REST API
+# then writes to the default branch); its message is checked like a commit's. Every "branch" and
+# "message" key counts, nested ones too, so a key inside the files list cannot stand in for the
+# real one.
 check_mcp() {
+    local v
+    case $tool in
+        *__create_or_update_file | *__push_files | *__delete_file)
+            field_all message
+            for v in "${FIELDS[@]}"; do
+                attributes_ai "$v" && block "$attribution_reason"
+            done
+            field_all branch
+            for v in "${FIELDS[@]}"; do
+                is_main "$v" && block "\`${tool##*__}\` on $v makes a commit on main through the GitHub API, and main moves only through a pull request or a fast-forward. Write to a branch of its own (create_branch) and open a pull request."
+            done
+            if ((!${#FIELDS[@]})) || [[ -z ${FIELDS[0]} ]]; then
+                field owner
+                local o=$REPLY
+                field repo
+                [[ -n $o && -n $REPLY ]] && block "\`${tool##*__}\` without a branch writes to the repository's default branch, main as a rule, and main moves only through a pull request or a fast-forward. Name a branch of its own (create_branch) and open a pull request."
+            fi
+            return 0 ;;
+    esac
     field owner
     local owner=$REPLY
     [[ -n $owner ]] || return 0

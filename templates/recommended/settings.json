@@ -108,7 +108,7 @@
         ]
       },
       {
-        "matcher": "mcp__.*__(create|merge)_pull_request",
+        "matcher": "mcp__.*__(create_pull_request|merge_pull_request|create_or_update_file|push_files|delete_file)",
         "hooks": [
           {
             "type": "command",

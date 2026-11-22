@@ -1120,6 +1120,55 @@ mcp 0 cfg-on $create '{"owner":"other","repo":"r","title":"t","body":"x"}'
 mcp 0 cfg-off $create '{"owner":"owner1","repo":"r","title":"t","body":"x"}'
 mcp 0 cfg-on mcp__plugin_github_github__issue_write '{"method":"create","owner":"owner1","repo":"r","title":"t","body":"x"}'
 mcp 0 cfg-on mcp__plugin_github_github__update_pull_request '{"owner":"owner1","repo":"r","pullNumber":5,"body":"x"}'
+# A file written through the GitHub MCP tools is a commit on GitHub's side: on main (or with no
+# branch, which is the default branch) it is refused in every repository, like a commit on main;
+# its message is checked for an attribution like a commit's; any server's tools count
+put=mcp__plugin_github_github__create_or_update_file
+push=mcp__plugin_github_github__push_files
+del=mcp__plugin_github_github__delete_file
+mcp 2 cfg-on $put '{"owner":"owner1","repo":"r","path":"a.md","content":"x","message":"Fix a typo","branch":"main"}'
+mcp 2 cfg-on $push '{"owner":"owner1","repo":"r","branch":"main","files":[{"path":"a.md","content":"x"}],"message":"Fix a typo"}'
+mcp 2 cfg-on $del '{"owner":"owner1","repo":"r","path":"a.md","message":"Drop a file","branch":"main"}'
+mcp 2 cfg-on $put '{"owner":"other","repo":"r","path":"a.md","content":"x","message":"Fix a typo","branch":"main"}'
+mcp 2 cfg-off $put '{"owner":"owner1","repo":"r","path":"a.md","content":"x","message":"Fix a typo","branch":"main"}'
+mcp 2 cfg-on $put '{"owner":"owner1","repo":"r","path":"a.md","content":"x","message":"Fix a typo","branch":"refs/heads/main"}'
+mcp 2 cfg-on $put '{"owner":"owner1","repo":"r","path":"a.md","content":"x","message":"Fix a typo"}'
+mcp 2 cfg-on $put '{"owner":"owner1","repo":"r","path":"a.md","content":"x","message":"Fix a typo","branch":""}'
+mcp 2 cfg-on mcp__github__push_files '{"owner":"owner1","repo":"r","branch":"main","files":[],"message":"x"}'
+mcp 2 cfg-on $put '{"owner":"owner1","repo":"r","path":"a.md","content":"x","message":"Fix a typo\n\nCo-Authored-By: Claude <noreply@anthropic.com>","branch":"feat/a"}'
+mcp 2 cfg-on $push '{"owner":"owner1","repo":"r","branch":"feat/a","files":[],"message":"Fix\n\nGenerated with Claude Code"}'
+mcp 0 cfg-on $put '{"owner":"owner1","repo":"r","path":"a.md","content":"x","message":"Fix a typo","branch":"feat/a"}'
+mcp 0 cfg-on $push '{"owner":"owner1","repo":"r","branch":"feat/a","files":[{"path":"a.md","content":"\"branch\":\"main\""}],"message":"Fix a typo"}'
+mcp 2 cfg-on $push '{"owner":"owner1","repo":"r","branch":"main","files":[{"path":"a.md","content":"\"branch\":\"feat/x\""}],"message":"Fix a typo"}'
+# Every key counts, a nested one too: it cannot stand in for the real branch or message
+mcp 2 cfg-on $push '{"owner":"o","repo":"r","files":[{"path":"a","content":"x","branch":"feat/x"}],"branch":"main","message":"m"}'
+mcp 2 cfg-on $push '{"owner":"o","repo":"r","branch":"feat/a","files":[{"path":"a","content":"x","message":"ok"}],"message":"Fix\n\nCo-Authored-By: Claude <noreply@anthropic.com>"}'
+mcp 2 cfg-on $del '{"owner":"owner1","repo":"r","path":"a.md","message":"Drop\n\nGenerated with Claude Code","branch":"feat/a"}'
+mcp 2 cfg-on $put '{"owner":"owner1","repo":"r","path":"a.md","content":"x","message":"Fix a typo","branch":"heads/main"}'
+mcp 2 cfg-on $put '{"owner":"owner1","repo":"r","path":"a.md","content":"x","message":"Fix a typo","branch":null}'
+# Another server's tool of the same name, without owner and repo, is no GitHub write, but its
+# commit message is still one and checked
+mcp 0 cfg-on mcp__gdrive__delete_file '{"fileId":"abc"}'
+mcp 2 cfg-on mcp__gitlab__push_files '{"project_id":"7","files":[],"message":"Fix\n\nCo-Authored-By: Claude <noreply@anthropic.com>"}'
+# Known limits, pinned: a nested branch stands in for a missing top-level one (the official server
+# requires branch), and an empty nested one next to a valid top-level branch over-blocks
+mcp 0 cfg-on $push '{"owner":"o","repo":"r","files":[{"path":"a","content":"x","branch":"feat/x"}],"message":"m"}'
+mcp 2 cfg-on $push '{"owner":"o","repo":"r","files":[{"path":"a","content":"x","branch":""}],"branch":"feat/x","message":"m"}'
+mcp 0 cfg-on $del '{"owner":"owner1","repo":"r","path":"main","message":"Drop main","branch":"feat/main-cleanup"}'
+mcp 0 cfg-on $put '{"owner":"owner1","repo":"r","path":"a.md","content":"x","message":"Fix a typo","branch":"Main"}'
+mcp 0 cfg-on mcp__plugin_github_github__create_branch '{"owner":"owner1","repo":"r","branch":"feat/b","from_branch":"main"}'
+# A large file still answers well inside the hook's 30 s timeout, which would let it through
+# unchecked: reading every key once cost time with the square of the size (84 s at 300 KB); now
+# about 0.3 s. One run over the limit is measured again, as in timed() below.
+big=$(head -c 307200 /dev/zero | tr '\0' 'a')
+for try in 1 2; do
+    start=$(date +%s%N)
+    mcp 2 cfg-on $push "{\"owner\":\"owner1\",\"repo\":\"r\",\"files\":[{\"path\":\"a\",\"content\":\"$big\"}],\"message\":\"m\",\"branch\":\"main\"}"
+    ms=$((($(date +%s%N) - start) / 1000000))
+    echo "timing: push_files of 300 KB: $ms ms"
+    ((ms >= 5000 && try == 1)) && run=$((run - 1)) || break
+done
+((ms < 5000)) || { fail=$((fail + 1)); echo "FAIL push_files of 300 KB took $ms ms"; }
 
 # The merge stop: the hook reads the pull request's body with `gh pr view` (a fake gh here, first on
 # PATH, that prints the file FAKE_GH_BODY names or fails like gh without a network) and refuses the

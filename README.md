@@ -304,10 +304,11 @@ A configuration made from `recommended` has the `closing-check` skill. To add it
 one, copy `templates/recommended/skills/closing-check` into its `skills/` folder, scan it with
 skillspector, take the closing-check lines of `templates/recommended/CLAUDE.md` ("Evidence" and
 "Heavy runs") into its `CLAUDE.md` and the `PreToolUse` entry with the matcher
-`mcp__.*__(create|merge)_pull_request` of `templates/recommended/settings.json` into its
-`settings.json` (without it, the GitHub MCP tools pass unchecked), add its `Stop` entry for the
-nudge if you want it, and run `install.ps1` again: the installer links the skill into every
-profile, and from then on `guard-git.sh` asks your pull requests for the section.
+`mcp__.*__(create_pull_request|merge_pull_request|create_or_update_file|push_files|delete_file)`
+of `templates/recommended/settings.json` into its `settings.json` (without it, the GitHub MCP
+tools pass unchecked), add its `Stop` entry for the nudge if you want it, and run `install.ps1`
+again: the installer links the skill into every profile, and from then on `guard-git.sh` asks
+your pull requests for the section.
 
 ## Language servers
 
@@ -415,7 +416,11 @@ newer Roslyn. `install.ps1` checks the plugin's start script, not the `csharp-ls
   command in backquotes among the switch's words, which runs first; in Windows PowerShell, which
   has no `&&`, a commit after a switch from main takes a call of its own), except the forms that
   make no commit (`--ff-only`, `--abort`, `--squash`, `--dry-run` and the like) and the first
-  commit of a fresh repository. A push to main (also a bare `git push` or `git push origin HEAD`
+  commit of a fresh repository; also a file written to main (or to no branch in an input naming
+  an owner and a repo, which the REST API writes to the default branch) through the GitHub MCP
+  tools `create_or_update_file`, `push_files` and `delete_file`, whose commit message it checks
+  for an attribution too.
+  A push to main (also a bare `git push` or `git push origin HEAD`
   from main, `--all`, `--branches`, the matching refspec `:` and a wildcard over the branches;
   not a dry run) and the merge of a pull
   request (`gh pr merge`, `gh api .../merge`, the GitHub MCP tool `merge_pull_request`) it puts
