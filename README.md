@@ -303,12 +303,11 @@ Your own groups or other private marketplaces go into `accounts.json`:
 A configuration made from `recommended` has the `closing-check` skill. To add it to an older
 one, copy `templates/recommended/skills/closing-check` into its `skills/` folder, scan it with
 skillspector, take the closing-check lines of `templates/recommended/CLAUDE.md` ("Evidence" and
-"Heavy runs") into its `CLAUDE.md` and the `PreToolUse` entry with the matcher
-`mcp__.*__(create_pull_request|merge_pull_request|create_or_update_file|push_files|delete_file)`
-of `templates/recommended/settings.json` into its `settings.json` (without it, the GitHub MCP
-tools pass unchecked), add its `Stop` entry for the nudge if you want it, and run `install.ps1`
-again: the installer links the skill into every profile, and from then on `guard-git.sh` asks
-your pull requests for the section.
+"Heavy runs") into its `CLAUDE.md` and the `PreToolUse` entry whose matcher starts with
+`mcp__.*__` from `templates/recommended/settings.json` into its `settings.json` (without it,
+the GitHub MCP tools pass unchecked), add its `Stop` entry for the nudge if you want it, and
+run `install.ps1` again: the installer links the skill into every profile, and from then on
+`guard-git.sh` asks your pull requests for the section.
 
 ## Language servers
 
@@ -397,50 +396,50 @@ newer Roslyn. `install.ps1` checks the plugin's start script, not the `csharp-ls
   paths and globs but not for searches, or `grep -r` in any repository with a `.env` would stop;
   `block-secrets.sh` guards those names. It reads names and folders, never a file's content; its
   header lists what it does not cover. Tests: `bash hooks/block-denied-reads.test.sh`.
-- `hooks/guard-git.sh` is a PreToolUse hook for Bash and PowerShell that blocks git and gh
-  commands the git rules forbid: AI attribution (Co-Authored-By naming Claude, Claude-Session,
-  "Generated with Claude Code", a Claude author) in commit, merge, tag and note messages, pull
-  requests and issues, also from a here-document, a message file or the commit whose message
-  and author a commit takes over (`git commit -C`, `-c`, `--reuse-message`, `--fixup`,
-  `--squash`); bulk staging (`git add -A`, `.`, `:/`, `-u`, the repository root, an
+- `hooks/guard-git.sh` is a PreToolUse hook for Bash, PowerShell and the GitHub MCP tools that
+  write. It blocks git and gh commands the git rules forbid, and the same through those tools: AI
+  attribution (Co-Authored-By naming Claude, Claude-Session, "Generated with Claude Code", a
+  Claude author) in commit, merge, tag and note messages, pull requests, issues, comments and
+  reviews, the GitHub MCP tools' texts included, also from a here-document, a message file or the
+  commit whose message and author a commit takes over (`git commit -C`, `-c`, `--reuse-message`,
+  `--fixup`, `--squash`); bulk staging (`git add -A`, `.`, `:/`, `-u`, the repository root, an
   exclude-only pathspec, `git commit -a`); skipped git hooks (`--no-verify`, `git commit -n`,
-  setting `core.hooksPath`); force pushes in every form (`--force`, `-fu`,
-  `--force-with-lease`, `+branch`, `--mirror`, deleting main, a long option also in any prefix
-  git takes for it, such as `--force-w`), and a pull request updated by
-  rebase, which rewrites its pushed branch on GitHub (`gh pr update-branch --rebase`, the
-  GraphQL `updatePullRequestBranch` with `REBASE`); and a commit on main: `commit`,
-  `cherry-pick`, `revert`, `am`, `merge`, `pull` and `rebase` while the repository the command
-  acts on has main checked out (read from its `HEAD` file, worktrees included, and followed
-  through a `git switch` or `git checkout` earlier on the line; joined by `;`, `||`, `&` or a
-  line break the switch may have failed, so the branch before it counts too, as it does for a
-  command in backquotes among the switch's words, which runs first; in Windows PowerShell, which
-  has no `&&`, a commit after a switch from main takes a call of its own), except the forms that
-  make no commit (`--ff-only`, `--abort`, `--squash`, `--dry-run` and the like) and the first
-  commit of a fresh repository; also a file written to main (or to no branch in an input naming
-  an owner and a repo, which the REST API writes to the default branch) through the GitHub MCP
-  tools `create_or_update_file`, `push_files` and `delete_file`, whose commit message it checks
-  for an attribution too.
-  A push to main (also a bare `git push` or `git push origin HEAD`
-  from main, `--all`, `--branches`, the matching refspec `:` and a wildcard over the branches;
-  not a dry run) and the merge of a pull
-  request (`gh pr merge`, `gh api .../merge`, the GitHub MCP tool `merge_pull_request`) it puts
-  to you as a permission question. Once the `closing-check` skill is installed, it also refuses a
+  setting `core.hooksPath`); force pushes in every form (`--force`, `-fu`, `--force-with-lease`,
+  `+branch`, `--mirror`, deleting main, a long option also in any prefix git takes for it, such as
+  `--force-w`), deleting a repository (`gh repo delete`, `gh api -X DELETE repos/...`, the GitHub
+  MCP tool `delete_repository`), which you do yourself, and a pull request updated by rebase,
+  which rewrites its pushed branch on GitHub (`gh pr update-branch --rebase`, the GraphQL
+  `updatePullRequestBranch` with `REBASE`); and a commit on main: `commit`, `cherry-pick`,
+  `revert`, `am`, `merge`, `pull` and `rebase` while the repository the command acts on has main
+  checked out (read from its `HEAD` file, worktrees included, and followed through a `git switch`
+  or `git checkout` earlier on the line; joined by `;`, `||`, `&` or a line break the switch may
+  have failed, so the branch before it counts too, as it does for a command in backquotes among
+  the switch's words, which runs first; in Windows PowerShell, which has no `&&`, a commit after a
+  switch from main takes a call of its own), except the forms that make no commit (`--ff-only`,
+  `--abort`, `--squash`, `--dry-run` and the like) and the first commit of a fresh repository;
+  also a file written to main (or to no branch in an input naming an owner and a repo, which the
+  REST API writes to the default branch) through the GitHub MCP tools `create_or_update_file`,
+  `push_files` and `delete_file`, whose commit message it checks for an attribution too. A push to
+  main (also a bare `git push` or `git push origin HEAD` from main, `--all`, `--branches`, the
+  matching refspec `:` and a wildcard over the branches; not a dry run) and the merge of a pull
+  request (`gh pr merge`, `gh api .../merge`, the GitHub MCP tool `merge_pull_request`) it puts to
+  you as a permission question. Once the `closing-check` skill is installed, it also refuses a
   pull request in one of your own repositories (its owner is the user gh is logged in as) whose
   body holds no filled `## Closing check` section: `gh pr create` in every body form, `gh api`
   creating one (REST or GraphQL) and the MCP tool `create_pull_request`; and the merge of one
-  whose body (read with `gh pr view`, the one call that reaches the network) has no filled
-  section or still an item `[open with owner]`, also when gh cannot read it; a pull request
-  Dependabot opened and wrote every commit of carries no such section, so only the merge question
-  applies to it (a commit authored by anyone else on its branch, a merge of main too, makes it
-  checked; `@dependabot rebase` keeps it Dependabot's own). Nothing inside an HTML comment
-  counts, as GitHub shows none of it, so a template may keep example items in one (a `<!--` in
-  a code block or on a line with a backtick stays text, which can only count more). The refusal
-  gives the section's skeleton; other people's repositories and setups without the skill are not
-  asked. Permission rules in `settings.json` match the start of a command only
-  (`Bash(git push --force*)` misses `git -C dir push --force`); this hook does not match the
-  command text either: it splits compound commands outside quotes and here-documents and looks
-  only at the program at command position, so a pull request body that mentions `git add -A`
-  passes. Tests: `bash hooks/guard-git.test.sh`.
+  whose body (read with `gh pr view`, the one call that reaches the network) has no filled section
+  or still an item `[open with owner]`, also when gh cannot read it; a pull request Dependabot
+  opened and wrote every commit of carries no such section, so only the merge question applies to
+  it (a commit authored by anyone else on its branch, a merge of main too, makes it checked;
+  `@dependabot rebase` keeps it Dependabot's own). Nothing inside an HTML comment counts, as
+  GitHub shows none of it, so a template may keep example items in one (a `<!--` in a code block
+  or on a line with a backtick stays text, which can only count more). The refusal gives the
+  section's skeleton; other people's repositories and setups without the skill are not asked.
+  Permission rules in `settings.json` match the start of a command only (`Bash(git push --force*)`
+  misses `git -C dir push --force`); this hook does not match the command text either: it splits
+  compound commands outside quotes and here-documents and looks only at the program at command
+  position, so a pull request body that mentions `git add -A` passes. Tests: `bash
+  hooks/guard-git.test.sh`.
 - `hooks/closing-check-nudge.sh` is a Stop hook: when the session's last message offers a
   handover or a `/clear`, or says the session is done, and shows no `## Closing check`, it asks
   once for the closing check (or for "it was no such offer"); the second stop always passes.

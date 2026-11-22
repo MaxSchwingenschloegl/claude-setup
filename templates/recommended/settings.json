@@ -108,7 +108,7 @@
         ]
       },
       {
-        "matcher": "mcp__.*__(create_pull_request|merge_pull_request|create_or_update_file|push_files|delete_file)",
+        "matcher": "mcp__.*__(create_pull_request|merge_pull_request|update_pull_request|issue_write|add_issue_comment|update_issue_comment|add_reply_to_pull_request_comment|add_comment_to_pending_review|pull_request_review_write|create_or_update_file|push_files|delete_file|delete_repository|create_issue|update_issue|create_pull_request_review|create_pending_pull_request_review|submit_pending_pull_request_review|create_and_submit_pull_request_review)",
         "hooks": [
           {
             "type": "command",

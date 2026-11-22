@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# PreToolUse hook (Bash, PowerShell, the GitHub MCP tools create_pull_request, merge_pull_request,
-# create_or_update_file, push_files and delete_file): blocks git and gh commands of a shape the
-# git rules forbid, a file written to main through the MCP tools,
+# PreToolUse hook (Bash, PowerShell, and the GitHub MCP tools that write a pull request, an issue,
+# a comment, a review or a file, or delete a repository, by the names the official and the older
+# reference server give them): blocks git and gh commands of a shape the git rules forbid, the
+# same through those MCP tools,
 # and asks the user before a push to main or the merge of a pull request. Rules alone are followed
 # most of the time, and permission rules in settings.json match a command's start only (they miss
 # `git -C dir push --force`); this is the hard stop for the rest. Plain bash on purpose, like
@@ -21,8 +22,11 @@
 #   subject line for a plain --fixup and --squash), in `git merge`, `git tag` and `git notes`
 #   (-m/--message, a here-document, the file of -F/--file), in `gh pr ...`, `gh issue ...` and
 #   `gh release ...` (title, body, the file of --body-file/-F/--notes-file when it exists), and in
-#   the commit message of the MCP tools create_or_update_file, push_files and delete_file (any
-#   server's, as it is a commit message wherever it lands).
+#   every text the MCP tools write: title, body, a merge commit's commit_title and commit_message
+#   (create_pull_request, update_pull_request, merge_pull_request, issue_write, add_issue_comment,
+#   update_issue_comment, add_reply_to_pull_request_comment, add_comment_to_pending_review,
+#   pull_request_review_write), and the commit message of create_or_update_file, push_files and
+#   delete_file; any server's tools of these names, in every repository.
 #   "CLAUDE.md" alone is no attribution.
 # - A Claude or Anthropic identity (either word in the name or the address, a person called
 #   Claude too): `git config user.name|user.email`, `git commit --author`, and the author a
@@ -44,6 +48,8 @@
 #   undo what they name; `gh pr update-branch
 #   --rebase` and the GraphQL updatePullRequestBranch with updateMethod REBASE, which rebase the
 #   pushed branch on GitHub's side. Plain `gh pr update-branch` merges main in and stays allowed.
+#   Deleting a repository, which takes all its history with it (`gh repo delete`, `gh api -X
+#   DELETE repos/<owner>/<repo>`, the MCP tool delete_repository): the user does it themselves.
 # - A commit on main: `git commit`, `cherry-pick`, `revert`, `am`, `merge`, `pull` and `rebase`
 #   while the repository the command acts on (its folder after cd and -C) has main checked out,
 #   unless a word of theirs says they make no commit (check_commit lists them: --ff-only, --abort,
@@ -112,9 +118,8 @@
 # core.hooksPath belongs to each repository, so a global one cannot sit beside them;
 # abbreviated long options other than --no-veri/--no-verif and those of git push (`--reuse` for
 # --reuse-message among them); a commit made through other GitHub MCP tools than the three file
-# tools or through the REST API (`gh api .../contents/...`), an attribution in the title or body
-# of a pull request, issue or comment written through the MCP tools, the MCP tool
-# delete_repository; for the closing check,
+# tools or through the REST API (`gh api .../contents/...`), an attribution in a text of MCP
+# tools other than those named above; for the closing check,
 # a merge through `gh api` (asked, its body not read), a pull request created in another tool,
 # the owner's own `!` commands, which pass no hook, and a repository a `git clone` earlier on the
 # same line makes (`git clone url x && cd x && gh pr create` is judged by the repository above
@@ -124,11 +129,12 @@
 # guard against accidents, not against a determined attacker.
 # Blocked although harmless: `git push` with --no-force, --no-force-with-lease or --no-all after the
 # option it undoes, which still counts; a GitHub MCP file write whose files list holds an empty
-# "branch" key next to a valid top-level one; a commit message, pull request or issue text that
-# quotes an attribution line (a text about this hook, say); `git add -A --dry-run`; a gh api call
-# naming updatePullRequestBranch that passes another value starting with "rebase" (`-f b='Rebase
-# ...'`); a plain `git pull` on main that could only fast-forward (pull.ff=only, or no commit of
-# main's own): the hook does not read git's configuration, and the reason names `git pull
+# "branch" key next to a valid top-level one; an MCP tool's input of more than 100,000 quotes or
+# backslashes, too many to check before the hook's timeout; a commit message, pull request or issue
+# text that quotes an attribution line (a text about this hook, say); `git add -A --dry-run`; a gh
+# api call naming updatePullRequestBranch that passes another value starting with "rebase" (`-f
+# b='Rebase ...'`); a plain `git pull` on main that could only fast-forward (pull.ff=only, or no
+# commit of main's own): the hook does not read git's configuration, and the reason names `git pull
 # --ff-only`; `git rebase --skip` and `git am --skip` on main, which go on committing there
 # (`--abort` ends them); a `git switch` in a folder made by `mkdir` on the same line, whose commit
 # is then judged by the repository above it; a commit after a switch away from main joined by ; || &
@@ -284,8 +290,19 @@ tool=$REPLY
 case $tool in
     Bash) shell=bash ;;
     PowerShell) shell=powershell ;;
+    # The GitHub MCP tools that write, by the names of the official server, its older releases
+    # (create_pending_pull_request_review, submit_pending_pull_request_review,
+    # create_and_submit_pull_request_review) and the older reference server (create_issue,
+    # update_issue, create_pull_request_review); keep this list and the matcher in
+    # templates/recommended/settings.json the same (guard-git.test.sh compares them)
     mcp__*__create_pull_request | mcp__*__merge_pull_request | mcp__*__create_or_update_file | \
-        mcp__*__push_files | mcp__*__delete_file) shell=mcp ;;
+        mcp__*__push_files | mcp__*__delete_file | mcp__*__delete_repository | \
+        mcp__*__update_pull_request | mcp__*__issue_write | mcp__*__add_issue_comment | \
+        mcp__*__update_issue_comment | mcp__*__add_reply_to_pull_request_comment | \
+        mcp__*__add_comment_to_pending_review | mcp__*__pull_request_review_write | \
+        mcp__*__create_issue | mcp__*__update_issue | mcp__*__create_pull_request_review | \
+        mcp__*__create_pending_pull_request_review | mcp__*__submit_pending_pull_request_review | \
+        mcp__*__create_and_submit_pull_request_review) shell=mcp ;;
     *) exit 0 ;;
 esac
 if [[ $shell != mcp ]]; then
@@ -1157,7 +1174,10 @@ check_gh() {
             if [[ $t =~ pulls/[0-9]+/merge || $t == *mergepullrequest* ]]; then
                 ask "Merging a pull request is the user's decision: gh api ... merge."
             fi
+            api_deletes_repo && repo_delete "gh api -X DELETE repos/..."
             api_creates_pr && closing_check_gate "$owner" "$REPLY" ;;
+        repo)
+            [[ $verb == delete ]] && repo_delete "gh repo delete" ;;
     esac
 }
 
@@ -1198,38 +1218,146 @@ api_creates_pr() {
     REPLY=$text
 }
 
+# True when this `gh api` call deletes a repository: DELETE on repos/<owner>/<repo>
+api_deletes_repo() {
+    local i a endpoint= method= pos=0
+    for ((i = at + 1; i < n; i++)); do
+        a=${words[i]}
+        case $a in
+            -X | --method) method=${words[i+1]^^}; ((i++)) ;;
+            -X?*) method=${a:2}; method=${method^^} ;;
+            --method=*) method=${a#*=}; method=${method^^} ;;
+            -f | -F | --field | --raw-field | --input | -H | --header | -q | --jq | -t | --template | \
+                --hostname | -p | --preview | --cache) ((i++)) ;;
+            -*) ;;
+            *) ((++pos == 2)) && endpoint=$a ;;
+        esac
+    done
+    # gh also takes a full URL, and GitHub reads doubled slashes as one
+    [[ $method == DELETE && $endpoint =~ ^(https?://[^/]+)?/*repos/+[^/]+/+[^/]+/*$ ]]
+}
+
+# Deleting a repository takes its whole history with it: the user does it, no session, also not
+# after a yes (a question could be answered in passing)
+repo_delete() {
+    block "\`$1\` deletes a repository with all its history. That is the user's decision, and the user does it themselves (gh repo delete in their own terminal, or the repository's settings on GitHub); no session does it, not even after a yes."
+}
+
 # The repository root of the folder a git add ran in last, kept for the next one
 root_of=$'\x01'
 root=
 root_base=
-# FIELDS: every string value of key $1 in the input, at any depth (field reads the first only).
-# The rest after each value comes from the match itself: cutting it off with ${rest#*...} costs
-# time with the square of the input's size (9.7 s at 100 KB), past the hook's timeout.
+# FIELDS: every string value of the keys in $1 (a|b) in the input, at any depth (field reads the
+# first only). The input is split once at every quote, and one walk over the pieces
+# joins those split at an escaped quote back together and takes each value that follows one of
+# the keys and a colon: the time grows with the number of quotes, not with keys times size. A
+# regex over the rest after each match took 233 s for 1500 comment bodies (130 KB), a replace of
+# each key over the input 12 s for 3 MB; past the hook's 30 s timeout a call goes unchecked.
+# Needs bash 4.4 or later for `local -` (Git for Windows ships it).
 field_all() {
-    local re='"'"$1"'"[[:space:]]*:[[:space:]]*"((\\.|[^"\\])*)"(.*)' rest=$input s
+    local i=-1 tok inside=0 start=0 key=0 want=0 b s
+    local -a t vp
     FIELDS=()
-    while [[ $rest =~ $re ]]; do
-        s=${BASH_REMATCH[1]}
-        rest=${BASH_REMATCH[3]}
-        s=${s//\\\\/$'\x01'}
-        s=${s//\\\"/\"}
-        s=${s//\\n/$'\n'}
-        s=${s//\\t/$'\t'}
-        s=${s//\\r/}
-        s=${s//\\\//\/}
-        FIELDS+=("${s//$'\x01'/\\}")
+    [[ $input == *'"'* ]] || return 0
+    # Word splitting, not read: read takes a 3 MB input byte by byte (7 s), splitting 0.15 s;
+    # local - keeps set -f (no file name expansion of the pieces) inside this function. The
+    # pieces are walked with for-in: ${t[i]} by index grows with the square of their number.
+    local - IFS='"'
+    set -f
+    t=($input)
+    IFS=$' \t\n'
+    too_many_pieces ${#t[@]}
+    for tok in "${t[@]}"; do
+        ((i++))
+        if ((!inside)); then
+            # between two strings: a colon after a key makes the next string its value
+            want=0 vp=()
+            ((key)) && [[ $tok =~ ^[[:space:]]*:[[:space:]]*$ ]] && want=1
+            key=0 inside=1 start=$i
+            continue
+        fi
+        ((want)) && vp+=("$tok")
+        # an odd run of backslashes before the quote escapes it: the string goes on (a regex,
+        # as ${tok##*[!\\]} grows with the square of the run: 38 s for 30,000 backslashes)
+        if [[ $tok == *\\ ]]; then
+            [[ $tok =~ (\\+)$ ]]
+            ((${#BASH_REMATCH[1]} % 2)) && continue
+        fi
+        inside=0
+        if ((!want)); then
+            ((i == start + 1)) && [[ $tok != *'|'* && "|$1|" == *"|$tok|"* ]] && key=1
+            continue
+        fi
+        # the value's pieces, joined by the quotes they were split at, in one step (appending
+        # to a string piece by piece copies it each time)
+        IFS='"'
+        s="${vp[*]}"
+        IFS=$' \t\n'
+        json_unescape "$s"
+        FIELDS+=("$REPLY")
     done
 }
 
-# The GitHub MCP tools (any server's create_pull_request and merge_pull_request): their input
-# names the owner, and the body or the pull request's number. A file written or deleted through
+# Bash takes about 40 microseconds for each piece between quotes or backslashes, and the hook
+# gets 30 s before it times out and lets the call through unchecked: an input of more pieces is
+# refused instead of checked (realistic work stays far below: a 3 MB push of shell source has
+# 23,000 quotes). A guard against accidents, not against input built to be slow.
+MCP_PIECES_MAX=100000
+too_many_pieces() {
+    (($1 > MCP_PIECES_MAX)) && block "the input of \`${tool##*__}\` has more than $MCP_PIECES_MAX quotes or backslashes, too many to check before the hook's timeout. Write it in smaller parts (several calls, or git with a pull request)."
+    return 0
+}
+
+# REPLY: JSON string text $1 decoded (\" \\ \/ \n \t, \r dropped, \u and others kept as they
+# are, like field), in one walk over the pieces between its backslashes: ${s//\\\"/\"} grows with
+# the square of the matches (7 s for 28,000 escaped quotes), splitting and joining does not
+json_unescape() {
+    REPLY=$1
+    [[ $1 == *\\* ]] || return 0
+    local - IFS='\' p skip=0 first=1
+    local -a parts out=()
+    set -f
+    parts=($1)
+    too_many_pieces ${#parts[@]}
+    for p in "${parts[@]}"; do
+        if ((first)); then
+            out+=("$p") first=0
+        elif ((skip)); then
+            # the piece after an escaped backslash is plain text
+            out+=("$p") skip=0
+        elif [[ -z $p ]]; then
+            out+=('\') skip=1
+        else
+            case ${p:0:1} in
+                '"' | /) out+=("$p") ;;
+                n) out+=($'\n'"${p:1}") ;;
+                t) out+=($'\t'"${p:1}") ;;
+                r) out+=("${p:1}") ;;
+                *) out+=("\\$p") ;;
+            esac
+        fi
+    done
+    IFS=
+    REPLY="${out[*]}"
+}
+
+# The GitHub MCP tools that write (any server's tools of the names routed above): for
+# create_pull_request and merge_pull_request the input names the owner, and the body or the pull
+# request's number, for the closing check. A file written or deleted through
 # them (create_or_update_file, push_files, delete_file) is a commit on GitHub's side: refused on
 # main in every repository, and with no branch when it names an owner and a repo (the REST API
 # then writes to the default branch); its message is checked like a commit's. Every "branch" and
 # "message" key counts, nested ones too, so a key inside the files list cannot stand in for the
-# real one.
+# real one. Every text these tools write (title, body, a merge commit's commit_title and
+# commit_message) is checked for an attribution, in every repository, as gh's are; deleting a
+# repository is the user's decision, as git push --mirror is.
 check_mcp() {
     local v
+    [[ $tool == *__delete_repository ]] && repo_delete delete_repository
+    field_all 'title|body|commit_title|commit_message'
+    for v in "${FIELDS[@]}"; do
+        attributes_ai "$v" && block "$attribution_reason"
+    done
     case $tool in
         *__create_or_update_file | *__push_files | *__delete_file)
             field_all message

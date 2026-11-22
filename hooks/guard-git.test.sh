@@ -181,6 +181,20 @@ check 2 Bash 'git push --force-if-includes --force-with-lease origin feature'
 check 2 Bash 'git push origin +feature'
 check 2 Bash 'git push origin +HEAD:feature'
 check 2 Bash 'git push --mirror'
+# Deleting a repository is the user's own step, through gh as through the MCP tool
+check 2 Bash 'gh repo delete owner1/r --yes'
+check 2 Bash 'gh -R owner1/r repo delete'
+check 2 Bash 'gh api -X DELETE repos/owner1/r'
+check 2 Bash 'gh api --method=delete /repos/owner1/r/'
+check 2 Bash 'gh api repos/owner1/r -X DELETE'
+check 2 Bash 'gh api --method DELETE repos/owner1/r'
+check 2 Bash 'gh api -X DELETE https://api.github.com/repos/owner1/r'
+check 2 Bash 'gh api -X DELETE repos//owner1/r'
+check 2 Bash 'gh api -X DELETE //repos/owner1/r//'
+check 2 PowerShell 'gh repo delete owner1/r --yes'
+check 0 Bash 'gh api -X DELETE repos/owner1/r/issues/1/labels/bug'
+check 0 Bash 'gh api repos/owner1/r'
+check 0 Bash 'gh repo view owner1/r'
 check 2 Bash 'git push origin :main'
 check 2 Bash 'git push origin --delete main'
 check 2 Bash 'git push -d origin main'
@@ -1120,6 +1134,87 @@ mcp 0 cfg-on $create '{"owner":"other","repo":"r","title":"t","body":"x"}'
 mcp 0 cfg-off $create '{"owner":"owner1","repo":"r","title":"t","body":"x"}'
 mcp 0 cfg-on mcp__plugin_github_github__issue_write '{"method":"create","owner":"owner1","repo":"r","title":"t","body":"x"}'
 mcp 0 cfg-on mcp__plugin_github_github__update_pull_request '{"owner":"owner1","repo":"r","pullNumber":5,"body":"x"}'
+# The texts the GitHub MCP tools write carry no attribution, as with gh: a title, a body, a merge
+# commit's title and message, in every repository; a text without one passes
+gh_mcp=mcp__plugin_github_github
+coauth='Co-Authored-By: Claude <noreply@anthropic.com>'
+mcp 2 cfg-on ${gh_mcp}__issue_write "{\"method\":\"create\",\"owner\":\"owner1\",\"repo\":\"r\",\"title\":\"t\",\"body\":\"x\\n\\n$coauth\"}"
+mcp 2 cfg-on ${gh_mcp}__issue_write '{"method":"update","owner":"other","repo":"r","issue_number":3,"title":"Generated with Claude Code","body":"x"}'
+mcp 0 cfg-on ${gh_mcp}__issue_write '{"method":"update","owner":"owner1","repo":"r","issue_number":3,"title":"Fix the page generated with Claude Code last week","body":"x"}'
+mcp 2 cfg-on ${gh_mcp}__add_issue_comment "{\"owner\":\"owner1\",\"repo\":\"r\",\"issue_number\":3,\"body\":\"Done.\\n\\n$coauth\"}"
+mcp 2 cfg-on ${gh_mcp}__update_issue_comment '{"owner":"owner1","repo":"r","comment_id":9,"body":"Done.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)"}'
+mcp 2 cfg-on ${gh_mcp}__update_pull_request "{\"owner\":\"owner1\",\"repo\":\"r\",\"pullNumber\":5,\"body\":\"x\\n\\n$coauth\"}"
+mcp 2 cfg-on ${gh_mcp}__add_reply_to_pull_request_comment "{\"owner\":\"owner1\",\"repo\":\"r\",\"commentId\":4,\"pullNumber\":5,\"body\":\"ok\\n\\n$coauth\"}"
+mcp 2 cfg-on ${gh_mcp}__add_comment_to_pending_review "{\"owner\":\"owner1\",\"repo\":\"r\",\"pullNumber\":5,\"path\":\"a\",\"body\":\"nit\\n\\n$coauth\",\"subjectType\":\"LINE\"}"
+mcp 2 cfg-on ${gh_mcp}__pull_request_review_write "{\"method\":\"create\",\"owner\":\"owner1\",\"repo\":\"r\",\"pullNumber\":5,\"body\":\"LGTM\\n\\n$coauth\"}"
+mcp 2 cfg-on ${gh_mcp}__merge_pull_request "{\"owner\":\"other\",\"repo\":\"r\",\"pullNumber\":5,\"commit_title\":\"t\",\"commit_message\":\"$coauth\"}"
+mcp 2 cfg-on ${gh_mcp}__create_pull_request "{\"owner\":\"other\",\"repo\":\"r\",\"title\":\"t\",\"head\":\"b\",\"base\":\"main\",\"body\":\"x\\n\\n$coauth\"}"
+mcp 2 cfg-on ${gh_mcp}__issue_write "{\"method\":\"create\",\"owner\":\"owner1\",\"repo\":\"r\",\"meta\":{\"body\":\"x\"},\"title\":\"t\",\"body\":\"x\\n\\n$coauth\"}"
+mcp 0 cfg-on ${gh_mcp}__add_issue_comment '{"owner":"owner1","repo":"r","issue_number":3,"body":"The CLAUDE.md rule now names the hook."}'
+mcp 0 cfg-on ${gh_mcp}__pull_request_review_write '{"method":"resolve_thread","owner":"owner1","repo":"r","pullNumber":5,"threadId":"PRRT_x"}'
+mcp 2 cfg-on ${gh_mcp}__merge_pull_request '{"owner":"other","repo":"r","pullNumber":5,"commit_title":"Generated with Claude Code"}'
+# The older reference server's names, and a review comment's body inside its comments list
+mcp 2 cfg-on mcp__github__create_issue "{\"owner\":\"owner1\",\"repo\":\"r\",\"title\":\"t\",\"body\":\"x\\n\\n$coauth\"}"
+mcp 2 cfg-on mcp__github__update_issue "{\"owner\":\"owner1\",\"repo\":\"r\",\"issue_number\":3,\"body\":\"x\\n\\n$coauth\"}"
+mcp 2 cfg-on mcp__github__create_pull_request_review "{\"owner\":\"owner1\",\"repo\":\"r\",\"pull_number\":5,\"event\":\"COMMENT\",\"comments\":[{\"path\":\"a\",\"line\":1,\"body\":\"nit\\n\\n$coauth\"}]}"
+mcp 0 cfg-on mcp__github__create_issue '{"owner":"owner1","repo":"r","title":"t","body":"x"}'
+# The official server's older review tools
+mcp 2 cfg-on ${gh_mcp}__create_and_submit_pull_request_review '{"owner":"owner1","repo":"r","pullNumber":5,"event":"COMMENT","body":"LGTM\n\nGenerated with Claude Code"}'
+mcp 2 cfg-on ${gh_mcp}__submit_pending_pull_request_review '{"owner":"owner1","repo":"r","pullNumber":5,"event":"COMMENT","body":"LGTM\n\nGenerated with Claude Code"}'
+# A key's name as a value is no key, and an escaped backslash before n is no line break
+mcp 0 cfg-on ${gh_mcp}__issue_write "{\"method\":\"create\",\"owner\":\"owner1\",\"repo\":\"r\",\"labels\":[\"body\",\"$coauth\"],\"title\":\"t\",\"body\":\"x\"}"
+mcp 0 cfg-on ${gh_mcp}__issue_write '{"method":"create","owner":"owner1","repo":"r","title":"t","body":"x\\nGenerated with Claude Code"}'
+mcp 2 cfg-on ${gh_mcp}__issue_write '{"method":"create","owner":"owner1","repo":"r","title":"t","body":"x\nGenerated with Claude Code"}'
+# Only the four keys count: a subtitle or bodyText is no text these tools write
+mcp 0 cfg-on ${gh_mcp}__issue_write "{\"method\":\"create\",\"owner\":\"owner1\",\"repo\":\"r\",\"title\":\"t\",\"subtitle\":\"$coauth\",\"bodyText\":\"$coauth\",\"body\":\"x\"}"
+# Large and many: these answer well inside the hook's 30 s timeout, past which a call goes
+# unchecked (1500 comment bodies took 233 s, a 300 KB body full of escaped quotes 37 s, before)
+many=
+for ((i = 1; i < 1500; i++)); do many+="{\"path\":\"src/f$i.ts\",\"line\":$i,\"body\":\"Please rename this.\"},"; done
+many+="{\"path\":\"a\",\"line\":1,\"body\":\"ok\\n\\n$coauth\"}"
+quotes=$(head -c 27000 /dev/zero | tr '\0' 'x')
+quotes=${quotes//x/'say \"hi\" '}
+for case in many quotes; do
+    for try in 1 2; do
+        start=$(date +%s%N)
+        if [[ $case == many ]]; then
+            mcp 2 cfg-on mcp__github__create_pull_request_review "{\"owner\":\"owner1\",\"repo\":\"r\",\"pull_number\":5,\"comments\":[$many]}"
+        else
+            mcp 2 cfg-on ${gh_mcp}__issue_write "{\"method\":\"create\",\"owner\":\"owner1\",\"repo\":\"r\",\"title\":\"t\",\"body\":\"$quotes\\n\\n$coauth\"}"
+        fi
+        ms=$((($(date +%s%N) - start) / 1000000))
+        echo "timing: MCP input ($case): $ms ms"
+        ((ms >= 10000 && try == 1)) && run=$((run - 1)) || break
+    done
+    ((ms < 10000)) || { fail=$((fail + 1)); echo "FAIL MCP input ($case) took $ms ms"; }
+done
+# A long run of escaped backslashes still answers in time (it took 38 s once), and an input
+# of more pieces than the hook can walk in time is refused, not let through
+slashes=$(head -c 30000 /dev/zero | tr '\0' 'x')
+slashes=${slashes//x/'\\'}
+start=$(date +%s%N)
+mcp 2 cfg-on ${gh_mcp}__issue_write "{\"method\":\"create\",\"owner\":\"owner1\",\"repo\":\"r\",\"title\":\"t\",\"body\":\"$coauth\\n$slashes\"}"
+ms=$((($(date +%s%N) - start) / 1000000))
+echo "timing: MCP input (30,000 escaped backslashes): $ms ms"
+((ms < 10000)) || { fail=$((fail + 1)); echo "FAIL MCP input with a backslash run took $ms ms"; }
+pieces=$(head -c 110000 /dev/zero | tr '\0' 'x')
+pieces=${pieces//x/'"a",'}
+mcp 2 cfg-on ${gh_mcp}__issue_write "{\"method\":\"create\",\"owner\":\"owner1\",\"repo\":\"r\",\"labels\":[${pieces}\"a\"],\"title\":\"t\",\"body\":\"x\"}"
+# A key that holds the separator of the names asked for is none of them
+mcp 0 cfg-on ${gh_mcp}__issue_write "{\"method\":\"create\",\"owner\":\"owner1\",\"repo\":\"r\",\"title|body\":\"$coauth\",\"title\":\"t\",\"body\":\"x\"}"
+# The routed tools and the template's matcher name the same tools: a name only one of them has
+# would pass unchecked, silently
+# every mcp__*__ name in the hook's `case $tool in` up to its `*) exit 0`, in any arm
+routed=$(sed -n '/^case \$tool in/,/^    \*) exit 0 ;;/p' "$hook" | grep -v '^ *#' | grep -o 'mcp__\*__[a-z_]*' | sed 's/mcp__\*__//' | sort -u)
+matched=$(grep -o '"matcher": "mcp__\.\*__([^"]*)"' "$(dirname "$0")/../templates/recommended/settings.json" | sed 's/.*(//; s/)"$//' | tr '|' '\n' | sort -u)
+run=$((run + 1))
+if [[ -z $routed || $routed != "$matched" ]]; then
+    fail=$((fail + 1))
+    echo "FAIL routed MCP tools and the template's matcher differ: $(diff <(echo "$routed") <(echo "$matched") | tr '\n' ' ')"
+fi
+# Deleting a repository through them is the user's decision, as git push --mirror is
+mcp 2 cfg-on ${gh_mcp}__delete_repository '{"owner":"owner1","repo":"r"}'
+mcp 2 cfg-on ${gh_mcp}__delete_repository '{"owner":"other","repo":"r"}'
 # A file written through the GitHub MCP tools is a commit on GitHub's side: on main (or with no
 # branch, which is the default branch) it is refused in every repository, like a commit on main;
 # its message is checked for an attribution like a commit's; any server's tools count
